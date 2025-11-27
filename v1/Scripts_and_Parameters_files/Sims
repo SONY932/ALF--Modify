@@ -1,0 +1,4 @@
+Y  8  2  1.0  -0.3  0.3    0.2  -0.2     20.0   0.1    10   10  10    0.0
+stop
+Run Lx_R Ly_R  UH_R J_Red J_Rose J_Yellow  J_Green  Beta_R Dtau_R NW_R NS_R NB_R CPU_R )
+Name=(Run L_R  UH_R J_Red J_Rose J_Yellow  Beta_R Dtau_R NW_R NS_R NB_R CPU_R )
