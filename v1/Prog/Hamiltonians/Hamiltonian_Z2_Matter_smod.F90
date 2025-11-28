@@ -1583,7 +1583,7 @@
           !   lambda=-1, G_r=+1: (0)(0)/4 = 0
           !   lambda=-1, G_r=-1: (0)(2)/4 = 0  <- Gauss violation killed
           
-          Compute_Gauss_Weight = DW_Gauss_weight(lambda_val, G_r)
+          Compute_Gauss_Weight = 0.25d0 * dble(1 + lambda_val) * dble(1 + lambda_val * G_r)
 
         End Function Compute_Gauss_Weight
 

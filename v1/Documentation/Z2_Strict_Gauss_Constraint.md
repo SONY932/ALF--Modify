@@ -798,6 +798,11 @@ detM = det(Ginv)
    - `Sweep_Lambda` 现在正确累积符号到 `Phase`
    - 不再使用 `abs(R_ferm)` 丢弃符号
 
+4. **`Compute_Gauss_Weight` 函数未定义引用**（编译期发现）
+   - 错误：调用了不存在的 `DW_Gauss_weight(lambda_val, G_r)`
+   - 修复：替换为直接计算公式 `0.25d0 * dble(1 + lambda_val) * dble(1 + lambda_val * G_r)`
+   - 对应公式：$W_r = \frac{1}{4}(1 + \lambda)(1 + \lambda G_r)$
+
 #### 🟡 中优先级
 
 - **时空 plaquette 项 S_plaq**（如需要 3D gauge action）
