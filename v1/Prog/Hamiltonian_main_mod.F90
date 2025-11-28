@@ -164,6 +164,8 @@
         !> This is the CORRECT implementation: B'_M = P[lambda] * B_M
         procedure, nopass :: Apply_P_Lambda_To_B => Apply_P_Lambda_To_B_base
         procedure, nopass :: Use_Strict_Gauss => Use_Strict_Gauss_base
+        !> Sweep over all lambda fields (site-only update with Sherman-Morrison)
+        procedure, nopass :: Sweep_Lambda => Sweep_Lambda_base
 #ifdef HDF5
         procedure, nopass :: write_parameters_hdf5 => write_parameters_hdf5_base
 #endif
@@ -870,6 +872,32 @@
            ! Override in Hamiltonian submodule for strict Gauss constraint
            
          end Subroutine Apply_P_Lambda_To_B_base
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Sweeps over all lambda fields for strict Gauss constraint.
+!> Uses Metropolis acceptance with Sherman-Morrison update.
+!>
+!> This base implementation does nothing.
+!> Override in Hamiltonian submodule for models with Gauss constraint.
+!>
+!> @param [INOUT] G   Complex(:,:)
+!> \verbatim
+!>  Equal-time Green function. Modified in place by lambda updates.
+!> \endverbatim
+!-------------------------------------------------------------------
+         Subroutine Sweep_Lambda_base(G)
+           Implicit none
+           
+           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: G(:,:)
+           
+           ! Default implementation: do nothing
+           ! Override in Hamiltonian submodule for strict Gauss constraint
+           
+         end Subroutine Sweep_Lambda_base
 
 #ifdef HDF5
          subroutine write_parameters_hdf5_base(filename)

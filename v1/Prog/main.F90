@@ -1006,11 +1006,20 @@ Program Main
                     else
                        CALL udvst(NST, nf_eff)%reset('l')
                     endif
-                 enddo
-                 
-                 IF ( LTAU == 1 .and. .not. Projector ) then
-                    Call TAU_M( udvst, GR, PHASE, NSTM, NWRAP, STAB_NT, LOBS_ST, LOBS_EN )
-                 endif
+                enddo
+                
+                ! Sweep over lambda fields for strict Gauss constraint (PRX 10.041057)
+                ! This must be done after wrap-up when GR and B_lambda_slice are synchronized
+                If (ham%Use_Strict_Gauss()) then
+                   Do nf_eff = 1, N_FL_eff
+                      nf = Calc_Fl_map(nf_eff)
+                      Call ham%Sweep_Lambda(GR(:,:,nf))
+                   Enddo
+                Endif
+                
+                IF ( LTAU == 1 .and. .not. Projector ) then
+                   Call TAU_M( udvst, GR, PHASE, NSTM, NWRAP, STAB_NT, LOBS_ST, LOBS_EN )
+                endif
               endif
 
            ENDDO

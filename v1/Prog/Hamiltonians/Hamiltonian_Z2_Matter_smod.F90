@@ -72,6 +72,7 @@
         ! Strict Gauss constraint (PRX 10.041057 Appendix A)
         procedure, nopass :: Apply_P_Lambda_To_B
         procedure, nopass :: Use_Strict_Gauss
+        procedure, nopass :: Sweep_Lambda
 #ifdef HDF5
         procedure, nopass :: write_parameters_hdf5
 #endif
@@ -128,6 +129,13 @@
       !>    gamma = -0.5 * ln(tanh(epsilon * h))
       !>    W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
       Real (Kind=Kind(0.d0)) :: Gamma_Gauss
+      !>    Storage for B_M' (B matrix at final time slice with P[lambda] applied)
+      !>    This is used for lambda update Sherman-Morrison formula
+      Complex (Kind=Kind(0.d0)), allocatable :: B_lambda_slice(:,:)
+      !>    Dimension info for lambda update
+      Integer :: N_sites_lambda = 0
+      Integer :: N_spin_lambda = 1   ! 1 or 2
+      Integer :: dimF_lambda = 0     ! = N_sites * N_spin
 
     contains
       
@@ -1157,12 +1165,24 @@
              Write(6,*) 'WARNING: Ham_h = 0, Gamma_Gauss set to 0 (no transverse field)'
           endif
           
+          ! ============================================================
+          ! Allocate B_lambda_slice for lambda update Sherman-Morrison
+          ! ============================================================
+          N_sites_lambda = Latt%N
+          N_spin_lambda = 2  ! Two spin species (up/down) in Z2_Matter model
+          dimF_lambda = N_sites_lambda * N_spin_lambda
+          
+          If (allocated(B_lambda_slice)) deallocate(B_lambda_slice)
+          Allocate(B_lambda_slice(dimF_lambda, dimF_lambda))
+          B_lambda_slice = cmplx(0.d0, 0.d0, kind(0.d0))
+          
           Write(6,*) '============================================================'
           Write(6,*) 'Strict Gauss constraint initialized (PRX Appendix A):'
           Write(6,*) '  lambda is TAU-INDEPENDENT: lambda_field(site)'
           Write(6,*) '  Sites: ', Latt%N
           Write(6,*) '  W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))'
           Write(6,*) '  Fermion: det(1 + P[lambda] * B_total)'
+          Write(6,*) '  B_lambda_slice allocated: ', dimF_lambda, 'x', dimF_lambda
           Write(6,*) '============================================================'
 
         End Subroutine Setup_Gauss_constraint
@@ -2008,8 +2028,222 @@
                 Enddo
              Enddo
           Endif
+          
+          ! ============================================================
+          ! Save B_M' (with P[lambda] applied) for lambda update SM formula
+          ! ============================================================
+          If (allocated(B_lambda_slice) .and. N_dim == dimF_lambda) then
+             B_lambda_slice(:,:) = B_slice(:,:)
+          Endif
 
         End Subroutine Apply_P_Lambda_To_B
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes the fermion determinant ratio for flipping lambda at site i.
+!> Uses Sherman-Morrison formula on B_lambda_slice and Green function G.
+!>
+!> For single spin or decoupled spins:
+!>   R_ferm = R_up * R_dn (if N_spin=2) or R_up (if N_spin=1)
+!> where R_sigma = 1 - 2*lambda_old * (B_M * G)_{ii}
+!>
+!> @param [IN] i_site   Integer, site index (1..N_sites)
+!> @param [IN] G        Complex(:,:), equal-time Green function at reference time slice
+!> @param [OUT] R_ferm  Complex, fermion determinant ratio
+!--------------------------------------------------------------------
+        Subroutine Lambda_Ferm_Ratio_site(i_site, G, R_ferm)
+          
+          Implicit none
+          
+          Integer, INTENT(IN) :: i_site
+          Complex (Kind=Kind(0.d0)), INTENT(IN) :: G(:,:)
+          Complex (Kind=Kind(0.d0)), INTENT(OUT) :: R_ferm
+          
+          ! Local
+          Integer :: Ns, N, J, lambda_old
+          Complex (Kind=Kind(0.d0)) :: BG_up, BG_dn
+          Complex (Kind=Kind(0.d0)) :: R_up, R_dn
+          
+          If (.not. UseStrictGauss .or. .not. allocated(B_lambda_slice)) then
+             R_ferm = cmplx(1.d0, 0.d0, kind(0.d0))
+             return
+          Endif
+          
+          Ns = N_sites_lambda
+          N  = dimF_lambda
+          lambda_old = lambda_field(i_site)
+          
+          ! Compute (B_M * G)_{i,i} for spin-up block
+          BG_up = cmplx(0.d0, 0.d0, kind(0.d0))
+          Do J = 1, N
+             BG_up = BG_up + B_lambda_slice(i_site, J) * G(J, i_site)
+          Enddo
+          R_up = cmplx(1.d0, 0.d0, kind(0.d0)) - 2.d0 * lambda_old * BG_up
+          
+          If (N_spin_lambda == 1) then
+             R_ferm = R_up
+          Else
+             ! Compute (B_M * G)_{i+Ns, i+Ns} for spin-down block
+             BG_dn = cmplx(0.d0, 0.d0, kind(0.d0))
+             Do J = 1, N
+                BG_dn = BG_dn + B_lambda_slice(i_site + Ns, J) * G(J, i_site + Ns)
+             Enddo
+             R_dn = cmplx(1.d0, 0.d0, kind(0.d0)) - 2.d0 * lambda_old * BG_dn
+             R_ferm = R_up * R_dn
+          Endif
+          
+        End Subroutine Lambda_Ferm_Ratio_site
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Updates Green function using Sherman-Morrison formula after lambda flip.
+!> For two decoupled spins, does two rank-1 updates.
+!>
+!> G_new = G - (G*u)*(w^T*G) / R_sigma
+!> where u = -2*lambda_old * e_i, w^T = B_M(i,:)
+!>
+!> @param [IN] i_site   Integer, site index (1..N_sites)
+!> @param [INOUT] G     Complex(:,:), Green function (modified in place)
+!> @param [IN] R_ferm   Complex, fermion determinant ratio (for consistency check)
+!--------------------------------------------------------------------
+        Subroutine Lambda_Update_Green_site(i_site, G, R_ferm)
+          
+          Implicit none
+          
+          Integer, INTENT(IN) :: i_site
+          Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: G(:,:)
+          Complex (Kind=Kind(0.d0)), INTENT(IN) :: R_ferm
+          
+          ! Local
+          Integer :: Ns, N, I, J, lambda_old
+          Complex (Kind=Kind(0.d0)) :: u_coeff
+          Complex (Kind=Kind(0.d0)), allocatable :: Gu(:), wG(:)
+          Complex (Kind=Kind(0.d0)) :: R_sigma, BG_ii
+          
+          If (.not. UseStrictGauss .or. .not. allocated(B_lambda_slice)) return
+          
+          Ns = N_sites_lambda
+          N  = dimF_lambda
+          lambda_old = lambda_field(i_site)
+          u_coeff = cmplx(-2.d0 * lambda_old, 0.d0, kind(0.d0))
+          
+          Allocate(Gu(N), wG(N))
+          
+          ! ==== Spin-up block rank-1 update ====
+          ! w^T = B_M(i_site, :)
+          ! u = -2*lambda_old at position i_site
+          
+          ! Compute w^T * G = (B_M(i,:) * G)
+          Do J = 1, N
+             wG(J) = cmplx(0.d0, 0.d0, kind(0.d0))
+             Do I = 1, N
+                wG(J) = wG(J) + B_lambda_slice(i_site, I) * G(I, J)
+             Enddo
+          Enddo
+          
+          ! Compute G * u = G(:, i_site) * u_coeff
+          Gu(:) = u_coeff * G(:, i_site)
+          
+          ! Compute R_up = 1 + w^T * G * u = 1 - 2*lambda_old * (B_M*G)_{i,i}
+          BG_ii = cmplx(0.d0, 0.d0, kind(0.d0))
+          Do I = 1, N
+             BG_ii = BG_ii + B_lambda_slice(i_site, I) * G(I, i_site)
+          Enddo
+          R_sigma = cmplx(1.d0, 0.d0, kind(0.d0)) - 2.d0 * lambda_old * BG_ii
+          
+          ! G_new = G - (G*u) * (w^T*G) / R_sigma
+          Do J = 1, N
+             Do I = 1, N
+                G(I, J) = G(I, J) - Gu(I) * wG(J) / R_sigma
+             Enddo
+          Enddo
+          
+          ! ==== Spin-down block rank-1 update (if applicable) ====
+          If (N_spin_lambda == 2) then
+             ! w^T = B_M(i_site+Ns, :)
+             Do J = 1, N
+                wG(J) = cmplx(0.d0, 0.d0, kind(0.d0))
+                Do I = 1, N
+                   wG(J) = wG(J) + B_lambda_slice(i_site + Ns, I) * G(I, J)
+                Enddo
+             Enddo
+             
+             ! G * u = G(:, i_site+Ns) * u_coeff
+             Gu(:) = u_coeff * G(:, i_site + Ns)
+             
+             ! R_dn = 1 - 2*lambda_old * (B_M*G)_{i+Ns, i+Ns}
+             BG_ii = cmplx(0.d0, 0.d0, kind(0.d0))
+             Do I = 1, N
+                BG_ii = BG_ii + B_lambda_slice(i_site + Ns, I) * G(I, i_site + Ns)
+             Enddo
+             R_sigma = cmplx(1.d0, 0.d0, kind(0.d0)) - 2.d0 * lambda_old * BG_ii
+             
+             ! G_new = G - (G*u) * (w^T*G) / R_sigma
+             Do J = 1, N
+                Do I = 1, N
+                   G(I, J) = G(I, J) - Gu(I) * wG(J) / R_sigma
+                Enddo
+             Enddo
+          Endif
+          
+          Deallocate(Gu, wG)
+          
+        End Subroutine Lambda_Update_Green_site
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Performs a full sweep over all lambda fields (site-only, not tau).
+!> Uses Metropolis acceptance with bosonic weight (PRX A6) and
+!> fermionic determinant ratio (Sherman-Morrison).
+!>
+!> @param [INOUT] G   Complex(:,:), equal-time Green function at reference time
+!--------------------------------------------------------------------
+        Subroutine Sweep_Lambda(G)
+          
+          Implicit none
+          
+          Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: G(:,:)
+          
+          ! Local
+          Integer :: i_site, lambda_old
+          Real (Kind=Kind(0.d0)) :: R_bose, R_tot, rand_val
+          Complex (Kind=Kind(0.d0)) :: R_ferm
+          
+          If (.not. UseStrictGauss) return
+          
+          ! Sweep over all sites (NOT time slices!)
+          Do i_site = 1, N_sites_lambda
+             lambda_old = lambda_field(i_site)
+             
+             ! --- Bosonic weight ratio (PRX A6) ---
+             R_bose = Compute_Gauss_Weight_Ratio_Lambda_PRX(i_site)
+             
+             ! --- Fermionic determinant ratio (Sherman-Morrison) ---
+             Call Lambda_Ferm_Ratio_site(i_site, G, R_ferm)
+             
+             ! --- Metropolis acceptance ---
+             R_tot = R_bose * abs(R_ferm)
+             Call random_number(rand_val)
+             
+             If (rand_val < R_tot) then
+                ! Accept the flip
+                lambda_field(i_site) = -lambda_old
+                
+                ! Update Green function via Sherman-Morrison
+                Call Lambda_Update_Green_site(i_site, G, R_ferm)
+             Endif
+          Enddo
+          
+        End Subroutine Sweep_Lambda
 
 !--------------------------------------------------------------------
 !> @author

@@ -751,26 +751,27 @@ detM = det(Ginv)
    - `S0` 函数已使用 `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` 计算玻色权重
    - 费米子部分通过标准的 Green function 更新机制处理
 
-#### ✅ 已完成 - P[λ] 正确实现
+#### ✅ 已完成 - 完整的 PRX A6 实现
 
 1. **P[λ] 在 B 矩阵层实现** ✅
    - **位置**：`wrapur_mod.F90` 在 `nt == Ltrot` 时调用 `ham%Apply_P_Lambda_To_B`
    - **函数**：`Hamiltonian_Z2_Matter_smod.F90` 中的 `Apply_P_Lambda_To_B`
    - **效果**：$B'_M = P[\lambda] \cdot B_M$，从而 $G = (1 + P[\lambda] \cdot \mathcal{B})^{-1}$
+   - **B_lambda_slice 保存**：每次 wrap-up 后保存 $B'_M$ 供 λ 更新使用
    - **已删除**：错误的 `Apply_P_Lambda_To_Green` 及其在 `cgr1_mod.F90` 中的调用
 
-#### 🔴 高优先级 - 待实现
+2. **λ 更新的 Sherman-Morrison 机制** ✅
+   - **Lambda_Ferm_Ratio_site**：计算费米子行列式比率
+     - 两自旋解耦：$R_{\text{ferm}} = R_\uparrow \times R_\downarrow$
+     - 单自旋：$R_{\text{ferm}}^\sigma = 1 - 2\lambda_i^{\text{old}} (B_M G_M)_{ii}$
+   - **Lambda_Update_Green_site**：Sherman-Morrison 更新 Green function
+     - 两自旋解耦做两次 rank-1 更新
 
-2. **λ 更新的 Sherman-Morrison 机制**
-   - λ 翻转只改变 $B_M$ 的第 i 行（和 i+N 行）
-   - 需要实现基于最后时间片 $G_M$ 和 $B_M$ 的 rank-1/rank-2 更新
-   - 行列式比率：$R_{\text{ferm}} = 1 - 2\lambda_i^{\text{old}} (B_M G_M)_{ii}$
-
-3. **独立的 Sweep_Lambda 循环**
-   - λ 是 τ-independent 的 site-only 变量
-   - 需要在 MC sweep 中添加独立的 `Sweep_Lambda` 循环
-   - 只遍历 site，不遍历 τ
-   - **不使用 Field_type=5**
+3. **独立的 Sweep_Lambda 循环** ✅
+   - **位置**：`main.F90` 在 CGR 计算后、下一个 sweep 前调用
+   - **函数**：`ham%Sweep_Lambda(GR(:,:,nf))`
+   - 只遍历 site（不遍历 τ），Metropolis 接受 + SM 更新
+   - **不使用 Field_type=5**，λ 是完全独立的 site 变量
 
 #### 🟡 中优先级
 
