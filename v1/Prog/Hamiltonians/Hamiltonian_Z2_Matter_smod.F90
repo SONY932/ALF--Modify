@@ -652,7 +652,8 @@
           !   W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
           !
           ! When lambda_i -> -lambda_i:
-          !   R_bose = exp(2 * gamma * tau_z(i,0) * tau_z(i,M-1) * lambda_old)
+          !   R_bose = exp(-2 * gamma * tau_z(i,0) * tau_z(i,M-1) * lambda_old)
+          !   NOTE: NEGATIVE sign! This is W_new / W_old.
           !
           ! CRITICAL: lambda is TAU-INDEPENDENT!
           ! We flip lambda_field(I), not lambda at specific tau.
