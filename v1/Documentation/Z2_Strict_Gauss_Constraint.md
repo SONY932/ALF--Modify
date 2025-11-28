@@ -728,12 +728,23 @@ detM = det(Ginv)
    - **效果**：$B'_M = P[\lambda] \cdot B_M$，从而 $G = (1 + P[\lambda] \cdot \mathcal{B})^{-1}$
    - **B_lambda_slice 保存**：每次 wrap-up 后保存 $B'_M$ 供 λ 更新使用
 
-2. **λ 更新的 Sherman-Morrison 机制** ✅
-   - **Lambda_Ferm_Ratio_site**：使用 `B_lambda_slice` 计算费米子行列式比率
-     - 两自旋解耦：$R_{\text{ferm}} = R_\uparrow \times R_\downarrow$
-     - 公式：$R_{\text{ferm}}^\sigma = 1 - 2\lambda_i^{\text{old}} (\texttt{B\_lambda\_slice} \cdot G)_{ii}$
-   - **Lambda_Update_Green_site**：使用 `B_lambda_slice` 进行 Sherman-Morrison 更新
-     - 两自旋解耦做两次 rank-1 更新
+2. **λ 更新的 Sherman-Morrison 机制** ✅ （🔥 **重大简化**）
+   
+   **关键洞察**：由于 $B \cdot G = 1 - G$（因为 $G = (1+B)^{-1}$），我们有：
+   $$(B \cdot G)_{ii} = 1 - G_{ii}$$
+   
+   因此：
+   $$R_{\text{ferm}}^\sigma = 1 - 2 \cdot (B \cdot G)_{ii} = 1 - 2(1 - G_{ii}) = 2G_{ii} - 1$$
+   
+   - **Lambda_Ferm_Ratio_site**：**只需要 G，不需要 `B_lambda_slice`！**
+     - 单自旋：$R_{\text{ferm}} = 2 G_{ii} - 1$
+     - 两自旋解耦：$R_{\text{ferm}} = (2 G_{ii}^{\uparrow} - 1) \times (2 G_{i+N,i+N}^{\downarrow} - 1)$
+   
+   - **Lambda_Update_Green_site**：**只需要 G，不需要 `B_lambda_slice`！**
+     $$G'_{jk} = G_{jk} + \frac{2 \cdot G_{ji} \cdot (\delta_{ik} - G_{ik})}{R_\sigma}$$
+     等价于：$G' = G + 2 \cdot G[:,i] \otimes (e_i - G[i,:]) / R_\sigma$
+   
+   这个简化**完全消除**了对 `B_lambda_slice` 的依赖，也消除了"时间片一致性"的潜在问题！
 
 3. **独立的 Sweep_Lambda 循环** ✅
    - **位置**：`main.F90` 在 CGR 计算后、TAU_M 之前调用
@@ -811,25 +822,30 @@ Call ham%GaussViol_Diagnostic(sweep_number)
 
 ### 🔧 实现要点
 
-#### 1. B_lambda_slice 同步
+#### 1. Sherman-Morrison 公式（简化版）
 
-**关键**：当 λ 翻转被接受时，必须同步更新 `B_lambda_slice` 的对应行：
+**关键简化**：由于 $B \cdot G = 1 - G$，公式完全不需要 `B_lambda_slice`！
 
 ```fortran
-! 在 Sweep_Lambda 的接受分支中：
-If (accept) then
-    lambda_field(i_site) = -lambda_old
-    Call Lambda_Update_Green_site(i_site, G, R_ferm)
-    
-    ! CRITICAL: 同步更新 B_lambda_slice!
-    If (N_spin == 1) then
-       B_lambda_slice(i_site, :) = -B_lambda_slice(i_site, :)
-    Else
-       B_lambda_slice(i_site, :) = -B_lambda_slice(i_site, :)
-       B_lambda_slice(i_site + N_sites, :) = -B_lambda_slice(i_site + N_sites, :)
-    Endif
-Endif
+! 费米子行列式比率：只需要 G
+R_ferm = 2.d0 * G(i_site, i_site) - 1.d0
+
+! Green function 更新：只需要 G
+! G' = G + 2 * G[:,i] ⊗ (e_i - G[i,:]) / R
+Do J = 1, N
+   delta_row(J) = -G(i_site, J)
+Enddo
+delta_row(i_site) = delta_row(i_site) + 1.d0
+
+coeff = 2.d0 / R_ferm
+Do J = 1, N
+   Do I = 1, N
+      G(I, J) = G(I, J) + coeff * G(I, i_site) * delta_row(J)
+   Enddo
+Enddo
 ```
+
+**注意**：`B_lambda_slice` 仍然在 `Apply_P_Lambda_To_B` 中保存，但不再用于 λ 更新计算。
 
 #### 2. Sweep_Lambda 调用位置
 

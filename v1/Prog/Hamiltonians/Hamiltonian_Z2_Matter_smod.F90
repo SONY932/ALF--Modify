@@ -2083,6 +2083,23 @@
 !> @param [OUT] R_ferm  Complex, fermion determinant ratio
 !--------------------------------------------------------------------
         Subroutine Lambda_Ferm_Ratio_site(i_site, G, R_ferm)
+          !
+          ! ============================================================
+          ! SIMPLIFIED FORMULA: R_ferm = 2*G_{ii} - 1
+          ! ============================================================
+          ! Key insight: Since B*G = 1 - G (because G = (1+B)^{-1}),
+          ! we have:
+          !   (B*G)_{ii} = 1 - G_{ii}
+          !
+          ! Therefore:
+          !   R_ferm = 1 - 2*(B*G)_{ii} = 1 - 2*(1 - G_{ii}) = 2*G_{ii} - 1
+          !
+          ! This completely eliminates the need for B_lambda_slice in
+          ! computing the fermion determinant ratio!
+          !
+          ! For two decoupled spins:
+          !   R_ferm = R_up * R_dn = (2*G_up_{ii} - 1) * (2*G_dn_{i+N,i+N} - 1)
+          ! ============================================================
           
           Implicit none
           
@@ -2091,35 +2108,24 @@
           Complex (Kind=Kind(0.d0)), INTENT(OUT) :: R_ferm
           
           ! Local
-          Integer :: Ns, N, J, lambda_old
-          Complex (Kind=Kind(0.d0)) :: BG_up, BG_dn
+          Integer :: Ns
           Complex (Kind=Kind(0.d0)) :: R_up, R_dn
           
-          If (.not. UseStrictGauss .or. .not. allocated(B_lambda_slice)) then
+          If (.not. UseStrictGauss) then
              R_ferm = cmplx(1.d0, 0.d0, kind(0.d0))
              return
           Endif
           
           Ns = N_sites_lambda
-          N  = dimF_lambda
-          lambda_old = lambda_field(i_site)
           
-          ! Compute (B_M * G)_{i,i} for spin-up block
-          BG_up = cmplx(0.d0, 0.d0, kind(0.d0))
-          Do J = 1, N
-             BG_up = BG_up + B_lambda_slice(i_site, J) * G(J, i_site)
-          Enddo
-          R_up = cmplx(1.d0, 0.d0, kind(0.d0)) - 2.d0 * lambda_old * BG_up
+          ! R_up = 2 * G(i,i) - 1
+          R_up = 2.d0 * G(i_site, i_site) - cmplx(1.d0, 0.d0, kind(0.d0))
           
           If (N_spin_lambda == 1) then
              R_ferm = R_up
           Else
-             ! Compute (B_M * G)_{i+Ns, i+Ns} for spin-down block
-             BG_dn = cmplx(0.d0, 0.d0, kind(0.d0))
-             Do J = 1, N
-                BG_dn = BG_dn + B_lambda_slice(i_site + Ns, J) * G(J, i_site + Ns)
-             Enddo
-             R_dn = cmplx(1.d0, 0.d0, kind(0.d0)) - 2.d0 * lambda_old * BG_dn
+             ! R_dn = 2 * G(i+Ns, i+Ns) - 1
+             R_dn = 2.d0 * G(i_site + Ns, i_site + Ns) - cmplx(1.d0, 0.d0, kind(0.d0))
              R_ferm = R_up * R_dn
           Endif
           
@@ -2141,6 +2147,23 @@
 !> @param [IN] R_ferm   Complex, fermion determinant ratio (for consistency check)
 !--------------------------------------------------------------------
         Subroutine Lambda_Update_Green_site(i_site, G, R_ferm)
+          !
+          ! ============================================================
+          ! SIMPLIFIED FORMULA using only G (no B_lambda_slice needed!)
+          ! ============================================================
+          ! Since B*G = 1 - G, the Sherman-Morrison update simplifies to:
+          !
+          ! G'_{jk} = G_{jk} - 2 * G_{ji} * (δ_{ik} - G_{ik}) / R_sigma
+          !
+          ! where R_sigma = 2*G_{ii} - 1
+          !
+          ! This can be written as:
+          !   For k = i: G'_{ji} = G_{ji} / R_sigma
+          !   For k ≠ i: G'_{jk} = G_{jk} + 2 * G_{ji} * G_{ik} / R_sigma
+          !
+          ! Or more compactly:
+          !   G' = G + 2 * G[:,i] ⊗ (e_i - G[i,:]) / R_sigma
+          ! ============================================================
           
           Implicit none
           
@@ -2149,78 +2172,65 @@
           Complex (Kind=Kind(0.d0)), INTENT(IN) :: R_ferm
           
           ! Local
-          Integer :: Ns, N, I, J, lambda_old
-          Complex (Kind=Kind(0.d0)) :: u_coeff
-          Complex (Kind=Kind(0.d0)), allocatable :: Gu(:), wG(:)
-          Complex (Kind=Kind(0.d0)) :: R_sigma, BG_ii
+          Integer :: Ns, N, I, J, idx
+          Complex (Kind=Kind(0.d0)) :: R_sigma, G_ii, coeff
+          Complex (Kind=Kind(0.d0)), allocatable :: G_col(:), delta_row(:)
           
-          If (.not. UseStrictGauss .or. .not. allocated(B_lambda_slice)) return
+          If (.not. UseStrictGauss) return
           
           Ns = N_sites_lambda
-          N  = dimF_lambda
-          lambda_old = lambda_field(i_site)
-          u_coeff = cmplx(-2.d0 * lambda_old, 0.d0, kind(0.d0))
+          N  = size(G, 1)
           
-          Allocate(Gu(N), wG(N))
+          Allocate(G_col(N), delta_row(N))
           
           ! ==== Spin-up block rank-1 update ====
-          ! w^T = B_M(i_site, :)
-          ! u = -2*lambda_old at position i_site
+          idx = i_site
+          G_ii = G(idx, idx)
+          R_sigma = 2.d0 * G_ii - cmplx(1.d0, 0.d0, kind(0.d0))
           
-          ! Compute w^T * G = (B_M(i,:) * G)
+          ! G_col = G(:, idx)
+          G_col(:) = G(:, idx)
+          
+          ! delta_row = e_idx - G(idx, :)
+          ! delta_row(k) = δ_{idx,k} - G(idx, k)
           Do J = 1, N
-             wG(J) = cmplx(0.d0, 0.d0, kind(0.d0))
-             Do I = 1, N
-                wG(J) = wG(J) + B_lambda_slice(i_site, I) * G(I, J)
-             Enddo
+             delta_row(J) = -G(idx, J)
           Enddo
+          delta_row(idx) = delta_row(idx) + cmplx(1.d0, 0.d0, kind(0.d0))
           
-          ! Compute G * u = G(:, i_site) * u_coeff
-          Gu(:) = u_coeff * G(:, i_site)
-          
-          ! Compute R_up = 1 + w^T * G * u = 1 - 2*lambda_old * (B_M*G)_{i,i}
-          BG_ii = cmplx(0.d0, 0.d0, kind(0.d0))
-          Do I = 1, N
-             BG_ii = BG_ii + B_lambda_slice(i_site, I) * G(I, i_site)
-          Enddo
-          R_sigma = cmplx(1.d0, 0.d0, kind(0.d0)) - 2.d0 * lambda_old * BG_ii
-          
-          ! G_new = G - (G*u) * (w^T*G) / R_sigma
+          ! G_new = G + 2 * G_col ⊗ delta_row / R_sigma
+          coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_sigma
           Do J = 1, N
              Do I = 1, N
-                G(I, J) = G(I, J) - Gu(I) * wG(J) / R_sigma
+                G(I, J) = G(I, J) + coeff * G_col(I) * delta_row(J)
              Enddo
           Enddo
           
           ! ==== Spin-down block rank-1 update (if applicable) ====
           If (N_spin_lambda == 2) then
-             ! w^T = B_M(i_site+Ns, :)
+             idx = i_site + Ns
+             G_ii = G(idx, idx)
+             R_sigma = 2.d0 * G_ii - cmplx(1.d0, 0.d0, kind(0.d0))
+             
+             ! G_col = G(:, idx) (note: G has already been updated for spin-up)
+             G_col(:) = G(:, idx)
+             
+             ! delta_row = e_idx - G(idx, :)
              Do J = 1, N
-                wG(J) = cmplx(0.d0, 0.d0, kind(0.d0))
-                Do I = 1, N
-                   wG(J) = wG(J) + B_lambda_slice(i_site + Ns, I) * G(I, J)
-                Enddo
+                delta_row(J) = -G(idx, J)
              Enddo
+             delta_row(idx) = delta_row(idx) + cmplx(1.d0, 0.d0, kind(0.d0))
              
-             ! G * u = G(:, i_site+Ns) * u_coeff
-             Gu(:) = u_coeff * G(:, i_site + Ns)
-             
-             ! R_dn = 1 - 2*lambda_old * (B_M*G)_{i+Ns, i+Ns}
-             BG_ii = cmplx(0.d0, 0.d0, kind(0.d0))
-             Do I = 1, N
-                BG_ii = BG_ii + B_lambda_slice(i_site + Ns, I) * G(I, i_site + Ns)
-             Enddo
-             R_sigma = cmplx(1.d0, 0.d0, kind(0.d0)) - 2.d0 * lambda_old * BG_ii
-             
-             ! G_new = G - (G*u) * (w^T*G) / R_sigma
+             ! G_new = G + 2 * G_col ⊗ delta_row / R_sigma
+             coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_sigma
              Do J = 1, N
                 Do I = 1, N
-                   G(I, J) = G(I, J) - Gu(I) * wG(J) / R_sigma
+                   G(I, J) = G(I, J) + coeff * G_col(I) * delta_row(J)
                 Enddo
              Enddo
           Endif
           
-          Deallocate(Gu, wG)
+          Deallocate(G_col, delta_row)
           
         End Subroutine Lambda_Update_Green_site
 
@@ -2267,20 +2277,21 @@
                 lambda_field(i_site) = -lambda_old
                 
                 ! Update Green function via Sherman-Morrison
+                ! NOTE: The simplified formula G' = G + 2*G[:,i]*(e_i - G[i,:])/R
+                ! uses only G, not B_lambda_slice. This is because B*G = 1 - G.
                 Call Lambda_Update_Green_site(i_site, G, R_ferm)
                 
                 ! ============================================================
-                ! CRITICAL: Synchronize B_lambda_slice with the new lambda!
+                ! NOTE: B_lambda_slice update is NO LONGER NEEDED here!
                 ! ============================================================
-                ! When lambda_i flips, the corresponding rows of B_lambda_slice
-                ! must also flip sign: B'(i,:) -> -B'(i,:)
-                ! Otherwise the next lambda update will use inconsistent B_M.
-                If (N_spin_lambda == 1) then
-                   B_lambda_slice(i_site, :) = -B_lambda_slice(i_site, :)
-                Else
-                   B_lambda_slice(i_site, :) = -B_lambda_slice(i_site, :)
-                   B_lambda_slice(i_site + N_sites_lambda, :) = -B_lambda_slice(i_site + N_sites_lambda, :)
-                Endif
+                ! The simplified Sherman-Morrison formula uses R = 2*G_{ii} - 1
+                ! and G' = G + 2*G[:,i]*(e_i - G[i,:])/R, which only depends on G.
+                ! This eliminates the need to keep B_lambda_slice synchronized.
+                !
+                ! B_lambda_slice is still saved in Apply_P_Lambda_To_B for
+                ! potential future use (debugging, alternative methods), but
+                ! it is not used in the current lambda update implementation.
+                ! ============================================================
              Endif
           Enddo
           
