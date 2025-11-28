@@ -1680,6 +1680,252 @@
 !> ALF Collaboration
 !>
 !> @brief
+!> Constructs the diagonal P[lambda] matrix for the strict Gauss constraint.
+!> P[lambda]_{ij} = lambda_i * delta_{ij}
+!>
+!> This matrix is used to modify the fermion boundary condition according to PRX A6:
+!>   det(1 + P[lambda] * B_total)
+!>
+!> @param[OUT] P_lambda  Complex(:,:), diagonal matrix
+!> @param[IN]  N_dim     Integer, matrix dimension
+!--------------------------------------------------------------------
+        Subroutine Construct_P_Lambda_Matrix(P_lambda, N_dim)
+
+          Implicit none
+          
+          Complex (Kind=Kind(0.d0)), Intent(OUT) :: P_lambda(:,:)
+          Integer, Intent(IN) :: N_dim
+          
+          ! Local
+          Integer :: I
+          
+          ! Initialize to zero
+          P_lambda = cmplx(0.d0, 0.d0, kind(0.d0))
+          
+          ! Set diagonal elements: P_ii = lambda_i
+          ! For sites 1 to Latt%N (assuming N_dim >= Latt%N)
+          Do I = 1, min(Latt%N, N_dim)
+             P_lambda(I, I) = cmplx(real(lambda_field(I), kind(0.d0)), 0.d0, kind(0.d0))
+          Enddo
+          
+          ! If there are two spin degrees of freedom (N_dim = 2*Latt%N),
+          ! set the second block as well
+          If (N_dim >= 2 * Latt%N) then
+             Do I = 1, Latt%N
+                P_lambda(I + Latt%N, I + Latt%N) = cmplx(real(lambda_field(I), kind(0.d0)), 0.d0, kind(0.d0))
+             Enddo
+          Endif
+
+        End Subroutine Construct_P_Lambda_Matrix
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Applies P[lambda] to a matrix: B_eff = P[lambda] * B
+!> This is used in wrap-up to modify the total propagator.
+!>
+!> @param[INOUT] B   Complex(:,:), matrix to modify (B -> P*B)
+!> @param[IN]    N_dim Integer, matrix dimension
+!--------------------------------------------------------------------
+        Subroutine Apply_P_Lambda_To_Matrix(B, N_dim)
+
+          Implicit none
+          
+          Complex (Kind=Kind(0.d0)), Intent(INOUT) :: B(:,:)
+          Integer, Intent(IN) :: N_dim
+          
+          ! Local
+          Integer :: I, J
+          Real (Kind=Kind(0.d0)) :: lambda_i
+          
+          ! P[lambda] * B: multiply row I by lambda_i
+          ! For single spin or first block
+          Do I = 1, min(Latt%N, N_dim)
+             lambda_i = real(lambda_field(I), kind(0.d0))
+             Do J = 1, N_dim
+                B(I, J) = lambda_i * B(I, J)
+             Enddo
+          Enddo
+          
+          ! For second spin block if present
+          If (N_dim >= 2 * Latt%N) then
+             Do I = 1, Latt%N
+                lambda_i = real(lambda_field(I), kind(0.d0))
+                Do J = 1, N_dim
+                   B(I + Latt%N, J) = lambda_i * B(I + Latt%N, J)
+                Enddo
+             Enddo
+          Endif
+
+        End Subroutine Apply_P_Lambda_To_Matrix
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes the Sherman-Morrison fermion determinant ratio for lambda flip.
+!> When lambda_i -> -lambda_i, only the i-th row of P changes.
+!>
+!> For single spin: R_ferm = 1 + w^T * G * u
+!>   where u = (-2 * lambda_old) * e_i, w^T = B_row_i
+!>
+!> Simplified formula: R_ferm = 1 - 2 * lambda_old * (B*G)_{ii}
+!>
+!> @param[IN] I      Integer, site index for lambda flip
+!> @param[IN] G      Complex(:,:), Green function matrix
+!> @param[IN] B      Complex(:,:), total propagator B_total
+!> @param[IN] N_dim  Integer, matrix dimension
+!> @return R_ferm (complex determinant ratio)
+!--------------------------------------------------------------------
+        Complex (Kind=Kind(0.d0)) Function Compute_Lambda_Flip_Fermion_Ratio(I, G, B, N_dim)
+
+          Implicit none
+          
+          Integer, Intent(IN) :: I, N_dim
+          Complex (Kind=Kind(0.d0)), Intent(IN) :: G(:,:), B(:,:)
+          
+          ! Local
+          Integer :: J
+          Integer :: lambda_old
+          Complex (Kind=Kind(0.d0)) :: BG_ii
+          
+          If (.not. UseStrictGauss) then
+             Compute_Lambda_Flip_Fermion_Ratio = cmplx(1.d0, 0.d0, kind(0.d0))
+             return
+          endif
+          
+          lambda_old = lambda_field(I)
+          
+          ! Compute (B*G)_{ii} = sum_j B(i,j) * G(j,i)
+          BG_ii = cmplx(0.d0, 0.d0, kind(0.d0))
+          Do J = 1, N_dim
+             BG_ii = BG_ii + B(I, J) * G(J, I)
+          Enddo
+          
+          ! R_ferm = 1 - 2 * lambda_old * (B*G)_{ii}
+          Compute_Lambda_Flip_Fermion_Ratio = cmplx(1.d0, 0.d0, kind(0.d0)) - &
+               & 2.d0 * real(lambda_old, kind(0.d0)) * BG_ii
+
+        End Function Compute_Lambda_Flip_Fermion_Ratio
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Updates the Green function using Sherman-Morrison after lambda flip.
+!> G_new = G_old - (G*u)*(w^T*G) / (1 + w^T*G*u)
+!>
+!> For lambda flip at site i: u = -2*lambda_old * e_i, w^T = B_row_i
+!>
+!> @param[INOUT] G     Complex(:,:), Green function (updated in place)
+!> @param[IN]    I     Integer, site index for lambda flip
+!> @param[IN]    B     Complex(:,:), total propagator B_total
+!> @param[IN]    N_dim Integer, matrix dimension
+!> @param[IN]    R_ferm Complex, the fermion ratio (1 + w^T*G*u)
+!--------------------------------------------------------------------
+        Subroutine Update_Green_Sherman_Morrison_Lambda(G, I, B, N_dim, R_ferm)
+
+          Implicit none
+          
+          Complex (Kind=Kind(0.d0)), Intent(INOUT) :: G(:,:)
+          Integer, Intent(IN) :: I, N_dim
+          Complex (Kind=Kind(0.d0)), Intent(IN) :: B(:,:)
+          Complex (Kind=Kind(0.d0)), Intent(IN) :: R_ferm
+          
+          ! Local
+          Integer :: J, K
+          Integer :: lambda_old
+          Complex (Kind=Kind(0.d0)) :: u_scalar
+          Complex (Kind=Kind(0.d0)), allocatable :: Gu(:), wG(:)
+          
+          If (abs(R_ferm) < 1.d-14) then
+             Write(6,*) 'WARNING: Update_Green_Sherman_Morrison_Lambda: R_ferm ~ 0'
+             return
+          endif
+          
+          lambda_old = lambda_field(I)
+          u_scalar = cmplx(-2.d0 * real(lambda_old, kind(0.d0)), 0.d0, kind(0.d0))
+          
+          Allocate(Gu(N_dim), wG(N_dim))
+          
+          ! Compute G*u: (G*u)_k = G(k,i) * u_scalar
+          Do K = 1, N_dim
+             Gu(K) = G(K, I) * u_scalar
+          Enddo
+          
+          ! Compute w^T*G: (w^T*G)_j = sum_k B(i,k) * G(k,j)
+          Do J = 1, N_dim
+             wG(J) = cmplx(0.d0, 0.d0, kind(0.d0))
+             Do K = 1, N_dim
+                wG(J) = wG(J) + B(I, K) * G(K, J)
+             Enddo
+          Enddo
+          
+          ! Update: G_new = G - (Gu * wG^T) / R_ferm
+          ! G_new(k,j) = G(k,j) - Gu(k) * wG(j) / R_ferm
+          Do K = 1, N_dim
+             Do J = 1, N_dim
+                G(K, J) = G(K, J) - Gu(K) * wG(J) / R_ferm
+             Enddo
+          Enddo
+          
+          Deallocate(Gu, wG)
+
+        End Subroutine Update_Green_Sherman_Morrison_Lambda
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes the total acceptance ratio for lambda flip (bose + fermion).
+!> R_tot = R_bose * R_ferm
+!>
+!> R_bose = exp(2 * gamma * tau_z(0) * tau_z(M-1) * lambda_old)  [PRX A6]
+!> R_ferm = det(1 + P_new * B) / det(1 + P_old * B)  [Sherman-Morrison]
+!>
+!> @param[IN] I      Integer, site index for lambda flip
+!> @param[IN] G      Complex(:,:), Green function matrix
+!> @param[IN] B      Complex(:,:), total propagator B_total
+!> @param[IN] N_dim  Integer, matrix dimension
+!> @return R_tot (real acceptance ratio)
+!--------------------------------------------------------------------
+        Real (Kind=Kind(0.d0)) Function Compute_Lambda_Flip_Total_Ratio(I, G, B, N_dim)
+
+          Implicit none
+          
+          Integer, Intent(IN) :: I, N_dim
+          Complex (Kind=Kind(0.d0)), Intent(IN) :: G(:,:), B(:,:)
+          
+          ! Local
+          Real (Kind=Kind(0.d0)) :: R_bose
+          Complex (Kind=Kind(0.d0)) :: R_ferm
+          
+          If (.not. UseStrictGauss) then
+             Compute_Lambda_Flip_Total_Ratio = 1.d0
+             return
+          endif
+          
+          ! Bose weight ratio from PRX A6
+          R_bose = Compute_Gauss_Weight_Ratio_Lambda_PRX(I)
+          
+          ! Fermion determinant ratio via Sherman-Morrison
+          R_ferm = Compute_Lambda_Flip_Fermion_Ratio(I, G, B, N_dim)
+          
+          ! Total ratio
+          Compute_Lambda_Flip_Total_Ratio = R_bose * abs(R_ferm)
+
+        End Function Compute_Lambda_Flip_Total_Ratio
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
 !> Specifiy the equal time and time displaced observables
 !> @details
 !--------------------------------------------------------------------
