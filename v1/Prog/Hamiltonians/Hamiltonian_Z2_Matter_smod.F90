@@ -69,6 +69,9 @@
         procedure, nopass :: Overide_global_tau_sampling_parameters
         procedure, nopass :: Get_Delta_S0_global
         procedure, nopass :: S0
+        ! Strict Gauss constraint (PRX 10.041057 Appendix A)
+        procedure, nopass :: Apply_P_Lambda_To_Green
+        procedure, nopass :: Use_Strict_Gauss
 #ifdef HDF5
         procedure, nopass :: write_parameters_hdf5
 #endif
@@ -1920,6 +1923,82 @@
           Compute_Lambda_Flip_Total_Ratio = R_bose * abs(R_ferm)
 
         End Function Compute_Lambda_Flip_Total_Ratio
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Returns whether strict Gauss constraint is enabled.
+!> @return .true. if UseStrictGauss is enabled
+!--------------------------------------------------------------------
+        Logical Function Use_Strict_Gauss()
+
+          Implicit none
+          
+          Use_Strict_Gauss = UseStrictGauss
+
+        End Function Use_Strict_Gauss
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Applies P[lambda] modification to Green function.
+!> Following PRX 10.041057 Appendix A:
+!>   G_eff is modified by the boundary condition P[lambda]
+!>
+!> The modification is: G_ij -> lambda_i * G_ij * lambda_j
+!> This accounts for the P[lambda] in det(1 + P[lambda] * B_total).
+!>
+!> Note: This is a simplified implementation. For full accuracy,
+!> the P[lambda] should be applied at the wrap-up level.
+!>
+!> @param [INOUT] GR   Complex(:,:)
+!> @param [IN] nf_eff   Integer, effective flavor index
+!--------------------------------------------------------------------
+        Subroutine Apply_P_Lambda_To_Green(GR, nf_eff)
+
+          Implicit none
+          
+          Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: GR(:,:)
+          Integer, INTENT(IN) :: nf_eff
+          
+          ! Local
+          Integer :: I, J, N_dim
+          Real (Kind=Kind(0.d0)) :: lambda_i, lambda_j
+          
+          If (.not. UseStrictGauss) return
+          
+          N_dim = size(GR, 1)
+          
+          ! Apply P[lambda] transformation to Green function
+          ! For det(1 + P*B), the Green function transforms as:
+          ! G_ij -> lambda_i * G_ij (left multiplication by P)
+          !
+          ! This is equivalent to modifying the boundary conditions:
+          ! - lambda_i = +1: periodic BC at site i
+          ! - lambda_i = -1: antiperiodic BC at site i
+          
+          Do I = 1, min(Latt%N, N_dim)
+             lambda_i = real(lambda_field(I), kind(0.d0))
+             Do J = 1, N_dim
+                GR(I, J) = lambda_i * GR(I, J)
+             Enddo
+          Enddo
+          
+          ! For two spin degrees of freedom
+          If (N_dim >= 2 * Latt%N) then
+             Do I = 1, Latt%N
+                lambda_i = real(lambda_field(I), kind(0.d0))
+                Do J = 1, N_dim
+                   GR(I + Latt%N, J) = lambda_i * GR(I + Latt%N, J)
+                Enddo
+             Enddo
+          Endif
+
+        End Subroutine Apply_P_Lambda_To_Green
 
 !--------------------------------------------------------------------
 !> @author

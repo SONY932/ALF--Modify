@@ -34,6 +34,8 @@ module cgr1_mod
   contains
 
       SUBROUTINE CGR(PHASE,NVAR, GRUP, udvr, udvl)
+      !> Note: Strict Gauss constraint (PRX 10.041057) support added.
+      !> After computing GRUP, call ham%Apply_P_Lambda_To_Green if enabled.
 
 !--------------------------------------------------------------------
 !> @author 
@@ -54,6 +56,7 @@ module cgr1_mod
 !--------------------------------------------------------------------
 
         Use UDV_State_mod
+        Use Hamiltonian_main, only: ham
 
 #if (defined(STAB2) || defined(STAB1)) && !defined(STABLOG)
         Use UDV_Wrap_mod
@@ -170,11 +173,19 @@ module cgr1_mod
         PHASE = Z1/ABS(Z1)
         CALL udvlocal%dealloc
         Deallocate(TPUP,TPUP1,TPUPM1, IPVT )
+        
+        ! Apply P[lambda] for strict Gauss constraint (PRX 10.041057 Appendix A)
+        ! This is done after computing GRUP = (1+B_total)^{-1}
+        ! to get GRUP_eff = (1 + P[lambda]*B_total)^{-1}
+        If (ham%Use_Strict_Gauss()) then
+           Call ham%Apply_P_Lambda_To_Green(GRUP, 1)
+        Endif
 
 #else
 
         USE MyMats
         USE QDRP_mod
+        Use Hamiltonian_main, only: ham
         
         Implicit None
         !Arguments.
@@ -438,6 +449,11 @@ module cgr1_mod
             CALL ZGEMM('N', 'C', N_size, N_size, N_size, alpha, RHS(1, 1), N_size, udvr%U(1,1), N_size, beta, GRUP(1, 1), N_size)
         ENDIF
         Deallocate(TPUP, DUP, IPVT, VISITED, RHS)
+        
+        ! Apply P[lambda] for strict Gauss constraint (PRX 10.041057 Appendix A)
+        If (ham%Use_Strict_Gauss()) then
+           Call ham%Apply_P_Lambda_To_Green(GRUP, 1)
+        Endif
 #endif
         
       END SUBROUTINE CGR

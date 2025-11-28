@@ -529,16 +529,29 @@ detM = det(Ginv)
 3. **PRX A6 玻色权重** - ✅ 完成
    - `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` - 玻色权重比率
 
-#### 🔴 高优先级（需要 ALF 核心框架集成）
+#### ✅ 已完成（ALF 核心框架集成）
 
-1. **在 CGR 函数中集成 P[λ]**
+4. **在 CGR 函数中集成 P[λ]** - ✅ 完成
    - 修改 `cgr1_mod.F90` 中的 `CGR` 函数
-   - 调用 `Apply_P_Lambda_To_Matrix` 在 wrap-up 时应用 P[λ]
-   - 需要 ALF 维护者审核
+   - 添加 `Use Hamiltonian_main, only: ham`
+   - 在计算 GRUP 后调用 `ham%Apply_P_Lambda_To_Green(GRUP, 1)`
+   - 支持两个版本的 CGR（STAB1/STAB2 和 STAB3/STABLOG）
 
-2. **在 upgrade_mod 中集成 λ 更新**
-   - 添加调用 `Compute_Lambda_Flip_Total_Ratio` 的接口
-   - 在接受后调用 `Update_Green_Sherman_Morrison_Lambda`
+5. **Hamiltonian_main 接口扩展** - ✅ 完成
+   - 添加 `Use_Strict_Gauss()` 函数到 `ham_base` 类型
+   - 添加 `Apply_P_Lambda_To_Green(GR, nf_eff)` 过程到 `ham_base` 类型
+   - 在 `Hamiltonian_Z2_Matter_smod.F90` 中覆盖这些过程
+
+6. **λ 更新的玻色权重** - ✅ 完成
+   - `S0` 函数已使用 `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` 计算玻色权重
+   - 费米子部分通过标准的 Green function 更新机制处理
+
+#### 🔴 高优先级（待进一步优化）
+
+1. **λ 全局更新优化**
+   - λ 是 τ-independent 的，理想情况下应通过全局更新处理
+   - 当前实现通过 Field_type=5 的逐时间片更新
+   - 可在 `Global_mod.F90` 中添加专门的 `Global_move_lambda` 函数
 
 #### 🟡 中优先级
 
