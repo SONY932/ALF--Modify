@@ -718,72 +718,52 @@ detM = det(Ginv)
 - 添加 P[λ] wrap-up 插入机制说明（模块 3.4）
 - 添加 Sherman-Morrison 更新说明（模块 5.1.1-5.1.3）
 
-### 待完成任务
+### 实现状态
 
-#### ✅ 已完成
-
-1. **P[λ] 构造和应用函数** - ✅ 完成
-   - `Construct_P_Lambda_Matrix(P, N)` - 构造对角矩阵
-   - `Apply_P_Lambda_To_Matrix(B, N)` - 应用到 B 矩阵
-
-2. **Sherman-Morrison λ 更新** - ✅ 完成
-   - `Compute_Lambda_Flip_Fermion_Ratio(I, G, B, N)` - 费米子行列式比率
-   - `Update_Green_Sherman_Morrison_Lambda(G, I, B, N, R)` - Green 函数更新
-   - `Compute_Lambda_Flip_Total_Ratio(I, G, B, N)` - 总接受率
-
-3. **PRX A6 玻色权重** - ✅ 完成
-   - `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` - 玻色权重比率
-
-#### ✅ 已完成（ALF 核心框架集成）
-
-4. **在 CGR 函数中集成 P[λ]** - ✅ 完成
-   - 修改 `cgr1_mod.F90` 中的 `CGR` 函数
-   - 添加 `Use Hamiltonian_main, only: ham`
-   - 在计算 GRUP 后调用 `ham%Apply_P_Lambda_To_Green(GRUP, 1)`
-   - 支持两个版本的 CGR（STAB1/STAB2 和 STAB3/STABLOG）
-
-5. **Hamiltonian_main 接口扩展** - ✅ 完成
-   - 添加 `Use_Strict_Gauss()` 函数到 `ham_base` 类型
-   - 添加 `Apply_P_Lambda_To_Green(GR, nf_eff)` 过程到 `ham_base` 类型
-   - 在 `Hamiltonian_Z2_Matter_smod.F90` 中覆盖这些过程
-
-6. **λ 更新的玻色权重** - ✅ 完成
-   - `S0` 函数已使用 `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` 计算玻色权重
-   - 费米子部分通过标准的 Green function 更新机制处理
-
-#### ✅ 已完成 - 完整的 PRX A6 实现
+#### ✅ 完整的 PRX A6 实现（当前版本）
 
 1. **P[λ] 在 B 矩阵层实现** ✅
    - **位置**：`wrapur_mod.F90` 在 `nt == Ltrot` 时调用 `ham%Apply_P_Lambda_To_B`
    - **函数**：`Hamiltonian_Z2_Matter_smod.F90` 中的 `Apply_P_Lambda_To_B`
    - **效果**：$B'_M = P[\lambda] \cdot B_M$，从而 $G = (1 + P[\lambda] \cdot \mathcal{B})^{-1}$
    - **B_lambda_slice 保存**：每次 wrap-up 后保存 $B'_M$ 供 λ 更新使用
-   - **已删除**：错误的 `Apply_P_Lambda_To_Green` 及其在 `cgr1_mod.F90` 中的调用
 
 2. **λ 更新的 Sherman-Morrison 机制** ✅
-   - **Lambda_Ferm_Ratio_site**：计算费米子行列式比率
+   - **Lambda_Ferm_Ratio_site**：使用 `B_lambda_slice` 计算费米子行列式比率
      - 两自旋解耦：$R_{\text{ferm}} = R_\uparrow \times R_\downarrow$
-     - 单自旋：$R_{\text{ferm}}^\sigma = 1 - 2\lambda_i^{\text{old}} (B_M G_M)_{ii}$
-   - **Lambda_Update_Green_site**：Sherman-Morrison 更新 Green function
+     - 公式：$R_{\text{ferm}}^\sigma = 1 - 2\lambda_i^{\text{old}} (\texttt{B\_lambda\_slice} \cdot G)_{ii}$
+   - **Lambda_Update_Green_site**：使用 `B_lambda_slice` 进行 Sherman-Morrison 更新
      - 两自旋解耦做两次 rank-1 更新
 
 3. **独立的 Sweep_Lambda 循环** ✅
-   - **位置**：`main.F90` 在 CGR 计算后、下一个 sweep 前调用
+   - **位置**：`main.F90` 在 CGR 计算后、TAU_M 之前调用
    - **函数**：`ham%Sweep_Lambda(GR(:,:,nf))`
    - 只遍历 site（不遍历 τ），Metropolis 接受 + SM 更新
-   - **不使用 Field_type=5**，λ 是完全独立的 site 变量
+   - **B_lambda_slice 同步**：λ 翻转接受后立即更新对应行
+
+4. **PRX A6 玻色权重** ✅
+   - `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` - 计算 $e^{2\gamma \tau^z_0 \tau^z_{M-1} \lambda_{\text{old}}}$
+
+5. **GaussViol 诊断** ✅
+   - `ham%GaussViol_Diagnostic(sweep_number)` - 实时检查 Gauss 约束
+
+#### ⚠️ 已废弃的旧实现（请勿使用）
+
+以下方法已被删除，**不要**在代码中使用：
+
+- ~~`Apply_P_Lambda_To_Green(GR, nf_eff)`~~：错误地在 CGR 中应用 $G' = P[\lambda] \cdot G$
+- ~~在 `cgr1_mod.F90` 中调用 `ham%Apply_P_Lambda_To_Green`~~：这会导致 P[λ] 被乘两次
+
+**正确做法**：P[λ] 只在 `wrapur_mod.F90` 的 `nt == Ltrot` 时通过 `Apply_P_Lambda_To_B` 乘一次。
 
 #### 🟡 中优先级
 
-3. **时空 plaquette 项 S_plaq**（如需要 3D gauge action）
-   - 添加 $K_{\text{plaq}} = \frac{1}{2}\ln[\coth(\epsilon g)]$
+- **时空 plaquette 项 S_plaq**（如需要 3D gauge action）
+  - 添加 $K_{\text{plaq}} = \frac{1}{2}\ln[\coth(\epsilon g)]$
 
 #### 🟢 低优先级
 
-4. **τ(0), τ(M−1) 索引验证**
-   - 确认 ALF 中 tau=1 对应 τ=0，tau=Ltrot 对应 τ=M-1
-
-5. **GaussSector odd/staggered 测试**
+- **GaussSector odd/staggered 测试**
 
 ---
 
@@ -874,7 +854,7 @@ do sweep = 1, N_sweeps
 end do
 ```
 
-#### 3. τ 索引约定
+#### 3. τ 索引约定（🔴 高优先级验证项）
 
 ALF 离散化约定：
 - `nt = 1` → $\tau = 0^+$（边界开始）
@@ -883,6 +863,14 @@ ALF 离散化约定：
 PRX A6 边界耦合：
 - `tau_z(i, 0)` → `Hamiltonian_set_Z2_matter(Isigma, 1)`
 - `tau_z(i, M-1)` → `Hamiltonian_set_Z2_matter(Isigma, Ltrot)`
+
+**验证测试建议**：
+1. 关闭所有其他相互作用，只保留 τ 横场 + Gauss 项
+2. 使用小系统：Lx=Ly=2, Ltrot=4
+3. 检查 $\langle \tau^z_0 \cdot \tau^z_{M-1} \rangle$：
+   - 大 $h$（强横场）时：应该强烈偏向"相同"（两者同号）
+   - 这对应 PBC/APBC 的明显区分
+4. 如果这个相关函数行为异常，说明索引搞错了
 
 ### 📊 GaussViol 诊断输出示例
 
