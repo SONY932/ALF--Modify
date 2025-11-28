@@ -619,44 +619,26 @@
                 S0 = S0*DW_Ising_Flux(F1,F2)
                 
                 ! ================================================================
-                ! GAUSS CONSTRAINT: sigma (gauge link) flip affects G_r at 2 sites
+                ! GAUSS CONSTRAINT: sigma (gauge link) flip
                 ! ================================================================
-                ! Link (I1, I1+a_orientation) is shared by sites I1 and the neighbor
-                ! Flipping sigma_b^x changes X_r at both endpoints
-                If (UseStrictGauss) then
-                   ! Site I1 is one endpoint of the link
-                   ! Get the other endpoint based on orientation
-                   if (Field_list_inv(n,2) == 1) then
-                      ! orientation = 1 (x-direction): link connects I1 to I1+a_x
-                      I2 = Latt%nnlist(I1, 1, 0)
-                   else
-                      ! orientation = 2 (y-direction): link connects I1 to I1+a_y
-                      I2 = Latt%nnlist(I1, 0, 1)
-                   endif
-                   
-                   ! Get lambda values at both sites
-                   nc_lambda_r1 = Field_list(I1, 3, 5)
-                   nc_lambda_r2 = Field_list(I2, 3, 5)
-                   lambda_old = nsigma%i(nc_lambda_r1, nt)  ! same for r2 if in valid config
-                   
-                   ! Compute G_r before the flip (current config)
-                   G_r_old = Compute_Gauss_Operator_Int(I1, nt)
-                   
-                   ! After flipping sigma_b^x, the star products at I1 and I2 will flip sign
-                   ! So G_r^new = -G_r^old at both sites (assuming tau_r doesn't change)
-                   G_r_new = -G_r_old
-                   
-                   ! Compute weight ratio for site I1
-                   R_Gauss = Compute_Gauss_Weight_Ratio(lambda_old, lambda_old, G_r_old, G_r_new)
-                   
-                   ! Compute weight ratio for site I2
-                   lambda_old = nsigma%i(nc_lambda_r2, nt)
-                   G_r_old = Compute_Gauss_Operator_Int(I2, nt)
-                   G_r_new = -G_r_old
-                   R_Gauss = R_Gauss * Compute_Gauss_Weight_Ratio(lambda_old, lambda_old, G_r_old, G_r_new)
-                   
-                   S0 = S0 * R_Gauss
-                endif
+                ! In PRX A6 framework:
+                ! - Gauss weight depends ONLY on tau_z at time boundaries (nt=1 and nt=Ltrot)
+                ! - sigma flip at bulk time slices does NOT affect Gauss weight
+                ! - sigma flip at boundary time slices affects tau_z via gauge coupling
+                !
+                ! IMPORTANT: The direct sigma-Gauss coupling is through the PRX A6 
+                ! formula: W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
+                ! sigma affects Gauss weight ONLY if it couples to tau_z at boundaries.
+                !
+                ! For now, we assume sigma flip does not directly change tau_z,
+                ! so no Gauss weight modification is needed here.
+                ! The P[lambda] in the fermion determinant handles the gauge-matter coupling.
+                !
+                ! If your model has sigma-tau coupling that changes tau_z at boundaries,
+                ! you need to add: R_Gauss = exp(-Delta_S_Gauss) where Delta_S uses PRX A6.
+                ! ================================================================
+                ! NOTE: The old soft constraint code has been removed because it is
+                ! incompatible with PRX A6 strict projection.
                 
              else
                 S0 = 1.d0
@@ -726,9 +708,10 @@
           Integer                   ::  ns , nc, n_op, n_op1, ntau_p1, ntau_m1, I, n
           Integer, allocatable      ::  Isigma1(:),Isigma2(:),Isigma3(:)
           Real  (Kind = Kind(0.d0)) ::  S0_Matter, T0_Proposal
-          ! Gauss constraint variables
+          ! Gauss constraint variables (PRX A6)
           Integer :: lambda_I, G_r_old, G_r_new, nc_lambda
-          Real (Kind = Kind(0.d0)) :: R_Gauss
+          Integer :: tau_z_0_old, tau_z_M1_old, tau_z_0_new, tau_z_M1_new
+          Real (Kind = Kind(0.d0)) :: R_Gauss, Delta_S_Gauss
 
           ! Write(6,*) 'In GLob_move', m,direction,ntau, size(Flip_list,1), Size(Flip_value,1), Flip_list(1)
           ! Ising from n_op = 1,Latt_unit%N_coord*Ndim
@@ -809,33 +792,45 @@
           endif
 
           ! ================================================================
-          ! GAUSS CONSTRAINT: tau spin flip affects G_r at site I
+          ! GAUSS CONSTRAINT: tau spin flip (PRX A6 framework)
           ! ================================================================
-          ! Global_move_tau flips the bond matter fields around site I,
-          ! which effectively flips tau_I^x. This changes G_I.
-          ! According to PRX: G_r = Q_r * (-1)^n_r * tau_r^x * X_r
-          ! When tau_I^x flips sign: G_I^new = -G_I^old
+          ! In PRX A6, Gauss weight depends ONLY on tau_z at time boundaries:
+          !   W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
           !
-          ! Weight ratio: R_Gauss = W(lambda_I, G_I^new) / W(lambda_I, G_I^old)
-          ! If G_I^old = +1 and we flip to G_I^new = -1, then R_Gauss = 0
-          ! This STRICTLY FORBIDS any update that violates Gauss law!
+          ! tau flip affects Gauss weight ONLY if it changes tau_z at:
+          !   - nt = 1 (tau = 0), or
+          !   - nt = Ltrot (tau = M-1)
+          !
+          ! For bulk time slices, tau flip does NOT affect Gauss weight.
+          ! ================================================================
           R_Gauss = 1.d0
           If (UseStrictGauss) then
-             ! Get lambda value at site I
-             nc_lambda = Field_list(I, 3, 5)
-             lambda_I = nsigma%i(nc_lambda, ntau)
-             
-             ! Compute G_r before the flip (current config)
-             G_r_old = Compute_Gauss_Operator_Int(I, ntau)
-             
-             ! After flipping tau_I^x, G_I changes sign
-             G_r_new = -G_r_old
-             
-             ! Compute Gauss weight ratio
-             R_Gauss = Compute_Gauss_Weight_Ratio(lambda_I, lambda_I, G_r_old, G_r_new)
-             
-             ! Multiply S0_Matter by Gauss weight
-             S0_Matter = S0_Matter * R_Gauss
+             ! Check if this is a boundary time slice
+             If (ntau == 1 .or. ntau == Ltrot) then
+                ! This flip affects tau_z at the boundary, need to compute weight change
+                ! Get old boundary values
+                tau_z_0_old = Get_Tau_Z_At_Time_0(I)
+                tau_z_M1_old = Get_Tau_Z_At_Time_M1(I)
+                
+                ! After flip, the tau_z at this boundary changes sign
+                If (ntau == 1) then
+                   tau_z_0_new = -tau_z_0_old
+                   tau_z_M1_new = tau_z_M1_old
+                else  ! ntau == Ltrot
+                   tau_z_0_new = tau_z_0_old
+                   tau_z_M1_new = -tau_z_M1_old
+                endif
+                
+                ! Compute Delta S_Gauss and weight ratio
+                ! R_Gauss = exp(-Delta_S) = exp(S_old - S_new)
+                Delta_S_Gauss = Compute_Delta_S_Gauss_Tau_Update(I, &
+                     & tau_z_0_old, tau_z_M1_old, tau_z_0_new, tau_z_M1_new)
+                R_Gauss = exp(-Delta_S_Gauss)
+                
+                ! Multiply S0_Matter by Gauss weight
+                S0_Matter = S0_Matter * R_Gauss
+             endif
+             ! For bulk time slices (not nt=1 or nt=Ltrot), R_Gauss = 1.d0 (no change)
           endif
 
           T0_Proposal       =  1.d0 - 1.d0/(1.d0+S0_Matter)
@@ -1989,18 +1984,23 @@
 !>
 !> @brief
 !> Computes the total acceptance ratio for lambda flip (bose + fermion).
-!> R_tot = R_bose * R_ferm
+!> R_tot = R_bose * R_ferm (complex)
 !>
-!> R_bose = exp(2 * gamma * tau_z(0) * tau_z(M-1) * lambda_old)  [PRX A6]
+!> R_bose = exp(-2 * gamma * tau_z(0) * tau_z(M-1) * lambda_old)  [PRX A6]
+!>          NOTE: NEGATIVE sign! This is W_new/W_old.
 !> R_ferm = det(1 + P_new * B) / det(1 + P_old * B)  [Sherman-Morrison]
+!>
+!> IMPORTANT: This function returns a COMPLEX ratio. The caller should:
+!>   - Use abs(R_tot) for Metropolis acceptance
+!>   - Accumulate sign/phase: Phase = Phase * R_tot / abs(R_tot)
 !>
 !> @param[IN] I      Integer, site index for lambda flip
 !> @param[IN] G      Complex(:,:), Green function matrix
 !> @param[IN] B      Complex(:,:), total propagator B_total
 !> @param[IN] N_dim  Integer, matrix dimension
-!> @return R_tot (real acceptance ratio)
+!> @return R_tot (complex total ratio, NOT abs!)
 !--------------------------------------------------------------------
-        Real (Kind=Kind(0.d0)) Function Compute_Lambda_Flip_Total_Ratio(I, G, B, N_dim)
+        Complex (Kind=Kind(0.d0)) Function Compute_Lambda_Flip_Total_Ratio(I, G, B, N_dim)
 
           Implicit none
           
@@ -2012,18 +2012,18 @@
           Complex (Kind=Kind(0.d0)) :: R_ferm
           
           If (.not. UseStrictGauss) then
-             Compute_Lambda_Flip_Total_Ratio = 1.d0
+             Compute_Lambda_Flip_Total_Ratio = cmplx(1.d0, 0.d0, kind(0.d0))
              return
           endif
           
-          ! Bose weight ratio from PRX A6
+          ! Bose weight ratio from PRX A6 (note: this already uses -2*gamma)
           R_bose = Compute_Gauss_Weight_Ratio_Lambda_PRX(I)
           
           ! Fermion determinant ratio via Sherman-Morrison
           R_ferm = Compute_Lambda_Flip_Fermion_Ratio(I, G, B, N_dim)
           
-          ! Total ratio
-          Compute_Lambda_Flip_Total_Ratio = R_bose * abs(R_ferm)
+          ! Total ratio (COMPLEX, preserves sign!)
+          Compute_Lambda_Flip_Total_Ratio = cmplx(R_bose, 0.d0, kind(0.d0)) * R_ferm
 
         End Function Compute_Lambda_Flip_Total_Ratio
 
