@@ -1,0 +1,37 @@
+ START TIME: 2025-11-28T19:57:50.222+00:00
+ =====================================
+ Model is      : Z2_Matter
+ Lattice is    : Square                                                          
+ # of orbitals :           16
+ Finite temperture version
+ Beta          :    2.0000000000000000     
+ dtau,Ltrot    :   0.10000000000000001               20
+ N_SUN         :            2
+ N_FL          :            1
+ t_Z2          :    1.0000000000000000     
+ g_Z2          :    1.0000000000000000     
+ K_Gauge       :    1.0000000000000000     
+ t_fermion     :    1.0000000000000000     
+ h_Matter      :    1.0000000000000000     
+ J_Gauge_Z2    :    1.0000000000000000     
+ Ham_chem      :    0.0000000000000000     
+ Ham_U         :    0.0000000000000000     
+ UseStrictGauss:  T
+ GaussSector   : even
+ No initial configuration, Seed_in       12345
+ Sweeps                              :          100
+ Bins                                :            2
+ No CPU-time limitation 
+ Measure Int.                        :            1          20
+ Stabilization,Wrap                  :            5
+ Nstm                                :            4
+ Ltau                                :            0
+ # of interacting Ops per time slice :           81
+ Default sequential updating 
+ This executable represents commit b01fe95 of branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441.
+  Precision Green  Mean, Max :    2.3140806035008422E-015   2.9198865962921670E-014
+  Precision Phase, Max       :    5.9983380689307471E-015
+  Acceptance                 :   0.40408179012345680     
+  Effective Acceptance       :   0.40408179012345680     
+  CPU Time                   :    1.2035612659999999     
+ FIN TIME: 2025-11-28T19:57:51.427+00:00

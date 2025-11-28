@@ -1,0 +1,22 @@
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add/rm <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	modified:   ALF.out
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	deleted:    Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	modified:   main.F90
+ 	deleted:    main.o
+ 
+ Untracked files:
+   (use "git add <file>..." to include in what will be committed)
+ 	../test_gauss/
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================

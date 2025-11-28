@@ -803,6 +803,35 @@ detM = det(Ginv)
    - 修复：替换为直接计算公式 `0.25d0 * dble(1 + lambda_val) * dble(1 + lambda_val * G_r)`
    - 对应公式：$W_r = \frac{1}{4}(1 + \lambda)(1 + \lambda G_r)$
 
+5. **`Compute_Gauss_Operator` 缺少费米子 parity**
+   - 错误：只计算了 bosonic 部分 `Q_r * tau_x * sigma_x`
+   - 修复：添加了费米子 parity `(1 - 2*GRC(I,I))^N_SUN`
+   - 对应公式：$G_r = Q_r \cdot (-1)^{n_f} \cdot \tau_r^x \cdot \prod_b \sigma_b^x$
+
+6. **SU(N) 对称性下 Green 函数维度问题**
+   - 发现：ALF 中 GR 维度是 `Ndim x Ndim`（不包含自旋），不是 `2*Ndim x 2*Ndim`
+   - 修复：`Lambda_Ferm_Ratio_site` 改为 `R_ferm = (2*G(i,i) - 1)^N_SUN`
+   - 修复：`Lambda_Update_Green_site` 改为只做一次 rank-1 更新
+
+7. **λ 翻转后 Green 函数不一致**
+   - 问题：λ 翻转后 GR 与新的 lambda_field 不一致
+   - 修复：在 `Sweep_Lambda` 后立即调用 CGR 重新计算 GR
+
+#### 🔵 待解决的问题
+
+1. **半满填充时 R_ferm = 0**
+   - 现象：当 `G(i,i) = 0.5`（半满）时，`R_ferm = (2*0.5-1)^2 = 0`
+   - 影响：所有 λ 更新被拒绝，系统无法正确采样
+   - 原因分析：这可能是 SM 公式的限制，或者 ALF Green 函数定义与 PRX 不完全匹配
+   - 潜在解决方案：
+     - 检查 ALF 中 Green 函数的精确定义
+     - 考虑使用不同的 λ 更新策略（如集体更新）
+     - 验证 PRX 论文中的参数范围是否避开了半满
+
+2. **非半满填充时数值不稳定**
+   - 现象：添加化学势后程序崩溃（G difference 超过阈值）
+   - 原因：可能是 CGR 重新计算与 λ 翻转的时序问题
+
 #### 🟡 中优先级
 
 - **时空 plaquette 项 S_plaq**（如需要 3D gauge action）

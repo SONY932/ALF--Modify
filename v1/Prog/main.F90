@@ -1026,6 +1026,23 @@ Program Main
                      ! Pass Phase to accumulate sign correctly
                      Call ham%Sweep_Lambda(GR(:,:,nf), Phase)
                   Enddo
+                  
+                  ! IMPORTANT: After lambda sweep, GR is no longer consistent with
+                  ! the new lambda_field. We must recompute GR to maintain consistency.
+                  ! This is necessary because Apply_P_Lambda_To_B uses the new lambda values.
+                  ! A more efficient implementation would use Sherman-Morrison updates.
+                  Phase_array = cmplx(1.d0, 0.d0, kind(0.D0))
+                  Do nf_eff = 1, N_FL_eff
+                     nf = Calc_Fl_map(nf_eff)
+                     NVAR = 1
+                     CALL CGR(Z1, NVAR, GR(:,:,nf), UDVR(nf_eff), UDVL(nf_eff))
+                     call Op_phase(Z1, OP_V, Nsigma, nf)
+                     Phase_array(nf) = Z1
+                  Enddo
+                  if (reconstruction_needed) call ham%weight_reconstruction(Phase_array)
+                  Z = product(Phase_array)
+                  Z = Z**N_SUN
+                  Phase = Z
                Endif
                 
                 IF ( LTAU == 1 .and. .not. Projector ) then

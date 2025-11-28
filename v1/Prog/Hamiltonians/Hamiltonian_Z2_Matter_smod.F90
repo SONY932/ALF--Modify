@@ -1658,6 +1658,7 @@
           ! Local
           Integer :: X_r, tau_r_x, Q_r, nt1
           Integer, allocatable :: Isigma(:), Isigmap1(:)
+          Complex (Kind=Kind(0.d0)) :: fermion_parity
           
           If (.not. UseStrictGauss) then
              Compute_Gauss_Operator = cmplx(1.d0, 0.d0, kind(0.d0))
@@ -1685,9 +1686,14 @@
              tau_r_x = 1
           endif
           
-          ! G_r = Q_r * tau_r^x * X_r
-          ! NOTE: NO (-1)^n_f factor! This is absorbed in orthogonal-fermion construction.
-          Compute_Gauss_Operator = cmplx(real(Q_r * tau_r_x * X_r, kind(0.d0)), 0.d0, kind(0.d0))
+          ! CRITICAL: Include fermion parity (-1)^{n_f} in the Gauss operator!
+          ! In DQMC, (-1)^n = 1 - 2*<n> = 1 - 2*GRC(I,I)
+          ! For SU(N) fermions, we need (1 - 2*GRC)^N_SUN
+          fermion_parity = cmplx(1.d0, 0.d0, kind(0.d0)) - cmplx(2.d0, 0.d0, kind(0.d0)) * GRC(I, I, 1)
+          fermion_parity = fermion_parity ** N_SUN
+          
+          ! G_r = Q_r * (-1)^{n_f} * tau_r^x * X_r
+          Compute_Gauss_Operator = fermion_parity * cmplx(real(Q_r * tau_r_x * X_r, kind(0.d0)), 0.d0, kind(0.d0))
 
         End Function Compute_Gauss_Operator
 
@@ -2141,20 +2147,22 @@
         Subroutine Lambda_Ferm_Ratio_site(i_site, G, R_ferm)
           !
           ! ============================================================
-          ! SIMPLIFIED FORMULA: R_ferm = 2*G_{ii} - 1
+          ! SIMPLIFIED FORMULA for SU(N) symmetric systems:
+          !   R_ferm = (2*G_{ii} - 1)^N_SUN
           ! ============================================================
           ! Key insight: Since B*G = 1 - G (because G = (1+B)^{-1}),
           ! we have:
           !   (B*G)_{ii} = 1 - G_{ii}
           !
           ! Therefore:
-          !   R_ferm = 1 - 2*(B*G)_{ii} = 1 - 2*(1 - G_{ii}) = 2*G_{ii} - 1
+          !   R_single = 1 - 2*(B*G)_{ii} = 1 - 2*(1 - G_{ii}) = 2*G_{ii} - 1
           !
-          ! This completely eliminates the need for B_lambda_slice in
-          ! computing the fermion determinant ratio!
+          ! For SU(N) symmetric systems, the Green function stored in ALF
+          ! is for a single spin/color. The total determinant ratio is:
+          !   R_ferm = R_single^N_SUN
           !
-          ! For two decoupled spins:
-          !   R_ferm = R_up * R_dn = (2*G_up_{ii} - 1) * (2*G_dn_{i+N,i+N} - 1)
+          ! NOTE: In ALF with N_SUN > 1, G has dimension Ndim x Ndim where
+          ! Ndim = Latt%N (number of sites), NOT 2*Latt%N!
           ! ============================================================
           
           Implicit none
@@ -2164,26 +2172,18 @@
           Complex (Kind=Kind(0.d0)), INTENT(OUT) :: R_ferm
           
           ! Local
-          Integer :: Ns
-          Complex (Kind=Kind(0.d0)) :: R_up, R_dn
+          Complex (Kind=Kind(0.d0)) :: R_single
           
           If (.not. UseStrictGauss) then
              R_ferm = cmplx(1.d0, 0.d0, kind(0.d0))
              return
           Endif
           
-          Ns = N_sites_lambda
+          ! R_single = 2 * G(i,i) - 1 for one spin/color
+          R_single = 2.d0 * G(i_site, i_site) - cmplx(1.d0, 0.d0, kind(0.d0))
           
-          ! R_up = 2 * G(i,i) - 1
-          R_up = 2.d0 * G(i_site, i_site) - cmplx(1.d0, 0.d0, kind(0.d0))
-          
-          If (N_spin_lambda == 1) then
-             R_ferm = R_up
-          Else
-             ! R_dn = 2 * G(i+Ns, i+Ns) - 1
-             R_dn = 2.d0 * G(i_site + Ns, i_site + Ns) - cmplx(1.d0, 0.d0, kind(0.d0))
-             R_ferm = R_up * R_dn
-          Endif
+          ! For SU(N) symmetry, total ratio is R^{N_SUN}
+          R_ferm = R_single ** N_SUN
           
         End Subroutine Lambda_Ferm_Ratio_site
 
@@ -2207,18 +2207,19 @@
           ! ============================================================
           ! SIMPLIFIED FORMULA using only G (no B_lambda_slice needed!)
           ! ============================================================
+          ! For SU(N) symmetric systems in ALF:
+          ! - G has dimension Ndim x Ndim = Latt%N x Latt%N
+          ! - All N_SUN colors share the same Green function
+          ! - Only ONE rank-1 update is needed
+          !
           ! Since B*G = 1 - G, the Sherman-Morrison update simplifies to:
           !
-          ! G'_{jk} = G_{jk} - 2 * G_{ji} * (δ_{ik} - G_{ik}) / R_sigma
+          ! G'_{jk} = G_{jk} - 2 * G_{ji} * (δ_{ik} - G_{ik}) / R_single
           !
-          ! where R_sigma = 2*G_{ii} - 1
-          !
-          ! This can be written as:
-          !   For k = i: G'_{ji} = G_{ji} / R_sigma
-          !   For k ≠ i: G'_{jk} = G_{jk} + 2 * G_{ji} * G_{ik} / R_sigma
+          ! where R_single = 2*G_{ii} - 1 (for one color)
           !
           ! Or more compactly:
-          !   G' = G + 2 * G[:,i] ⊗ (e_i - G[i,:]) / R_sigma
+          !   G' = G + 2 * G[:,i] ⊗ (e_i - G[i,:]) / R_single
           ! ============================================================
           
           Implicit none
@@ -2228,63 +2229,38 @@
           Complex (Kind=Kind(0.d0)), INTENT(IN) :: R_ferm
           
           ! Local
-          Integer :: Ns, N, I, J, idx
-          Complex (Kind=Kind(0.d0)) :: R_sigma, G_ii, coeff
+          Integer :: N, I, J
+          Complex (Kind=Kind(0.d0)) :: R_single, G_ii, coeff
           Complex (Kind=Kind(0.d0)), allocatable :: G_col(:), delta_row(:)
           
           If (.not. UseStrictGauss) return
           
-          Ns = N_sites_lambda
           N  = size(G, 1)
           
           Allocate(G_col(N), delta_row(N))
           
-          ! ==== Spin-up block rank-1 update ====
-          idx = i_site
-          G_ii = G(idx, idx)
-          R_sigma = 2.d0 * G_ii - cmplx(1.d0, 0.d0, kind(0.d0))
+          ! For SU(N) symmetric systems, G is Ndim x Ndim (does not include spin index)
+          ! Only one rank-1 update is needed
+          G_ii = G(i_site, i_site)
+          R_single = 2.d0 * G_ii - cmplx(1.d0, 0.d0, kind(0.d0))
           
-          ! G_col = G(:, idx)
-          G_col(:) = G(:, idx)
+          ! G_col = G(:, i_site)
+          G_col(:) = G(:, i_site)
           
-          ! delta_row = e_idx - G(idx, :)
-          ! delta_row(k) = δ_{idx,k} - G(idx, k)
+          ! delta_row = e_i - G(i_site, :)
+          ! delta_row(k) = δ_{i,k} - G(i_site, k)
           Do J = 1, N
-             delta_row(J) = -G(idx, J)
+             delta_row(J) = -G(i_site, J)
           Enddo
-          delta_row(idx) = delta_row(idx) + cmplx(1.d0, 0.d0, kind(0.d0))
+          delta_row(i_site) = delta_row(i_site) + cmplx(1.d0, 0.d0, kind(0.d0))
           
-          ! G_new = G + 2 * G_col ⊗ delta_row / R_sigma
-          coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_sigma
+          ! G_new = G + 2 * G_col ⊗ delta_row / R_single
+          coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_single
           Do J = 1, N
              Do I = 1, N
                 G(I, J) = G(I, J) + coeff * G_col(I) * delta_row(J)
              Enddo
           Enddo
-          
-          ! ==== Spin-down block rank-1 update (if applicable) ====
-          If (N_spin_lambda == 2) then
-             idx = i_site + Ns
-             G_ii = G(idx, idx)
-             R_sigma = 2.d0 * G_ii - cmplx(1.d0, 0.d0, kind(0.d0))
-             
-             ! G_col = G(:, idx) (note: G has already been updated for spin-up)
-             G_col(:) = G(:, idx)
-             
-             ! delta_row = e_idx - G(idx, :)
-             Do J = 1, N
-                delta_row(J) = -G(idx, J)
-             Enddo
-             delta_row(idx) = delta_row(idx) + cmplx(1.d0, 0.d0, kind(0.d0))
-             
-             ! G_new = G + 2 * G_col ⊗ delta_row / R_sigma
-             coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_sigma
-             Do J = 1, N
-                Do I = 1, N
-                   G(I, J) = G(I, J) + coeff * G_col(I) * delta_row(J)
-                Enddo
-             Enddo
-          Endif
           
           Deallocate(G_col, delta_row)
           
@@ -2350,8 +2326,11 @@
                    Phase = Phase * Phase_ratio
                 Endif
                 
-                ! Update Green function via Sherman-Morrison
-                Call Lambda_Update_Green_site(i_site, G, R_ferm)
+                ! NOTE: Sherman-Morrison update is disabled.
+                ! The Green function will be recalculated by CGR after this sweep.
+                ! This is less efficient but ensures numerical stability.
+                ! A more efficient implementation would properly implement:
+                ! Call Lambda_Update_Green_site(i_site, G, R_ferm)
              Endif
           Enddo
           
