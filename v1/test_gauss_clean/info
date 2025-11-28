@@ -1,4 +1,4 @@
- START TIME: 2025-11-28T20:19:53.556+00:00
+ START TIME: 2025-11-28T20:41:03.894+00:00
  =====================================
  Model is      : Z2_Matter
  Lattice is    : Square                                                          
@@ -14,13 +14,13 @@
  t_fermion     :    1.0000000000000000     
  h_Matter      :    1.0000000000000000     
  J_Gauge_Z2    :    1.0000000000000000     
- Ham_chem      :    0.0000000000000000     
+ Ham_chem      :    2.0000000000000000     
  Ham_U         :    0.0000000000000000     
  UseStrictGauss:  T
  GaussSector   : even
  No initial configuration, Seed_in      123456
- Sweeps                              :           20
- Bins                                :            5
+ Sweeps                              :          200
+ Bins                                :           10
  No CPU-time limitation 
  Measure Int.                        :            1          10
  Stabilization,Wrap                  :           10
@@ -28,10 +28,9 @@
  Ltau                                :            0
  # of interacting Ops per time slice :           21
  Default sequential updating 
- This executable represents commit b114ada of branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441.
-  Precision Green  Mean, Max :    5.3596949937256831E-010   1.7257887618971068E-008
-  Precision Phase, Max       :    5.9554324343322957E-024
-  Acceptance                 :   0.35921428571428571     
-  Effective Acceptance       :   0.35921428571428571     
-  CPU Time                   :    4.2322897999999998E-002
- FIN TIME: 2025-11-28T20:19:53.598+00:00
+ This executable represents commit bb71ab3 of branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441.
+
+   6010.2402383185936       is exceeding the threshold of 10 for G difference!
+   2.0630076388254346       is the average deviation!
+ This calculation is unstable and therefore aborted!!!
+

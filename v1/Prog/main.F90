@@ -1026,11 +1026,20 @@ Program Main
                      ! Pass Phase to accumulate sign correctly
                      Call ham%Sweep_Lambda(GR(:,:,nf), Phase)
                   Enddo
-                  ! NOTE: SM update is disabled, so G may be inconsistent with
-                  ! the new lambda configuration. However, at the next regular
-                  ! CGR call, G will be properly rebuilt.
-                  ! The key insight is that the ACCEPTANCE decision was made
-                  ! based on the CORRECT ratio, even if G itself isn't updated.
+                  ! IMPORTANT: Since SM update is disabled, rebuild G with new lambda
+                  ! This is inefficient but ensures correctness
+                  Phase_array = cmplx(1.d0, 0.d0, kind(0.D0))
+                  Do nf_eff = 1, N_FL_eff
+                     nf = Calc_Fl_map(nf_eff)
+                     NVAR = 1
+                     CALL CGR(Z1, NVAR, GR(:,:,nf), UDVR(nf_eff), UDVL(nf_eff))
+                     call Op_phase(Z1,OP_V,Nsigma,nf)
+                     Phase_array(nf)=Z1
+                  Enddo
+                  if (reconstruction_needed) call ham%weight_reconstruction(Phase_array)
+                  Z=product(Phase_array)
+                  Z=Z**N_SUN
+                  Phase = Z
                Endif
                 
                 IF ( LTAU == 1 .and. .not. Projector ) then

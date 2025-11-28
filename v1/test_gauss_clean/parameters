@@ -9,7 +9,7 @@ L2           = 2
 N_SUN        = 2
 ham_T        = 1.0d0
 ham_TZ2      = 1.0d0
-Ham_chem     = 0.0d0
+Ham_chem     = 2.0d0
 Ham_U        = 0.0d0
 Ham_J        = 1.0d0
 Ham_K        = 1.0d0
@@ -25,8 +25,8 @@ GaussSector  = "even"
 /
 
 &VAR_QMC
-NSweep       = 20
-NBin         = 5
+NSweep       = 200
+NBin         = 10
 Nwrap        = 10
 Ltau         = 0
 CPU_MAX      = 0

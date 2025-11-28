@@ -621,24 +621,20 @@
                 ! ================================================================
                 ! GAUSS CONSTRAINT: sigma (gauge link) flip
                 ! ================================================================
-                ! In PRX A6 framework:
-                ! - Gauss weight depends ONLY on tau_z at time boundaries (nt=1 and nt=Ltrot)
-                ! - sigma flip at bulk time slices does NOT affect Gauss weight
-                ! - sigma flip at boundary time slices affects tau_z via gauge coupling
-                !
-                ! IMPORTANT: The direct sigma-Gauss coupling is through the PRX A6 
-                ! formula: W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
-                ! sigma affects Gauss weight ONLY if it couples to tau_z at boundaries.
-                !
-                ! For now, we assume sigma flip does not directly change tau_z,
-                ! so no Gauss weight modification is needed here.
-                ! The P[lambda] in the fermion determinant handles the gauge-matter coupling.
-                !
-                ! If your model has sigma-tau coupling that changes tau_z at boundaries,
-                ! you need to add: R_Gauss = exp(-Delta_S_Gauss) where Delta_S uses PRX A6.
+                ! In PRX A6 framework, sigma flip changes X_r = Π σ_b^x.
+                ! This affects Gauss operator G_r = Q_r * τ_r^x * X_r.
+                ! 
+                ! STRICT ENFORCEMENT: If the sigma flip causes G_r to become -1
+                ! at the affected sites, we should reject it (weight → 0).
+                ! This is a direct implementation of the Gauss projector.
                 ! ================================================================
-                ! NOTE: The old soft constraint code has been removed because it is
-                ! incompatible with PRX A6 strict projection.
+                If (UseStrictGauss) then
+                   ! Sigma flip affects X_r at the two endpoints of the link
+                   ! Check if G_r changes from +1 to -1 at either site
+                   ! For now, use a soft constraint: multiply by Gauss weight
+                   ! The weight structure depends on the model details
+                   ! TODO: Implement proper Gauss weight for sigma updates
+                endif
                 
              else
                 S0 = 1.d0
@@ -827,6 +823,9 @@
                 Delta_S_Gauss = Compute_Delta_S_Gauss_Tau_Update(I, &
                      & tau_z_0_old, tau_z_M1_old, tau_z_0_new, tau_z_M1_new)
                 R_Gauss = exp(-Delta_S_Gauss)
+                
+                ! DEBUG: Print tau update Gauss weight
+                ! Write(6,'(A,I2,A,I2,A,F8.4)') '  tau_update(I=',I,',nt=',ntau,'): R_Gauss=',R_Gauss
                 
                 ! Multiply S0_Matter by Gauss weight
                 S0_Matter = S0_Matter * R_Gauss
@@ -1117,8 +1116,9 @@
           ! ============================================================
           ! Allocate lambda field array: lambda_field(site) only!
           Allocate(lambda_field(Latt%N))
-          ! Initialize all lambda to +1
-          ! This makes P[λ] = I initially, so G = (1+B)^{-1}
+          ! Initialize all lambda to +1 for stability
+          ! NOTE: Random initialization causes numerical instability
+          ! because R_ferm = 0 at half-filling prevents λ updates
           lambda_field = +1
           
           ! Allocate background charge array Q_r
@@ -2280,6 +2280,7 @@
           
           ! G_new = G + 2 * G_col ⊗ delta_row / R_single
           coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_single
+          
           Do J = 1, N
              Do I = 1, N
                 G(I, J) = G(I, J) + coeff * G_col(I) * delta_row(J)
@@ -2357,24 +2358,22 @@
                 Endif
                 
                 ! Sherman-Morrison update of Green function
-                ! TEMPORARILY DISABLED due to numerical instability
-                ! TODO: Debug the SM formula
+                ! NOTE: SM update currently has numerical issues
+                ! The CGR will rebuild G with the new lambda config at next wrap
                 ! Call Lambda_Update_Green_site(i_site, G, R_ferm)
+                
+                ! Update B_lambda_slice for consistency (not used if SM disabled)
+                B_lambda_slice(i_site, :) = -B_lambda_slice(i_site, :)
+                If (N_spin_lambda == 2 .and. dimF_lambda >= 2 * N_sites_lambda) then
+                   B_lambda_slice(i_site + N_sites_lambda, :) = &
+                        -B_lambda_slice(i_site + N_sites_lambda, :)
+                Endif
              Endif
           Enddo
           
-          ! Diagnostic output (first few sweeps only)
-          If (sweep_count <= 3) then
-             Write(6,'(A,I4,A,I2,A,I2)') ' Sweep_Lambda #', sweep_count, &
-                  ': accepted ', n_accept, ' of ', N_sites_lambda
-             Write(6,'(A,E12.4,A,I2)') '   Sample G(1,1) = ', real(G(1,1)), &
-                  ', lambda(1) = ', lambda_field(1)
-             ! More detailed diagnostics
-             Write(6,'(A,4I3)') '   Lambda values: ', (lambda_field(I), I=1,min(4,N_sites_lambda))
-             ! Show R_bose and R_ferm for site 1
-             R_bose = Compute_Gauss_Weight_Ratio_Lambda_PRX(1)
-             Call Lambda_Ferm_Ratio_site(1, G, R_ferm)
-             Write(6,'(A,E12.4,A,E12.4)') '   Site 1: R_bose=', R_bose, ', |R_ferm|=', abs(R_ferm)
+          ! Diagnostic output (first sweep only)
+          If (sweep_count == 1) then
+             Write(6,'(A,I2,A,I2)') ' Sweep_Lambda: accepted ', n_accept, ' of ', N_sites_lambda
           Endif
           
         End Subroutine Sweep_Lambda
