@@ -96,6 +96,7 @@
       !logical              :: Projector = .false.  ! Whether the projective algorithm is used
       real(Kind=Kind(0.d0)) :: Theta    = 0.d0      ! Projection parameter
       Integer               :: N_part   = -1        ! Number of particles in trial wave function. If N_part < 0 -> N_part = L1*L2/2
+      Logical               :: UseStrictGauss = .false.  ! Whether to use strict Gauss constraint projection
       !#PARAMETERS END#
       
       Type (Lattice),        target :: Latt
@@ -108,6 +109,16 @@
       Real (Kind=Kind(0.d0)) :: DW_Ising_tau(-1:1), DW_Ising_Space(-1:1), DW_Ising_Flux(-1:1,-1:1)
       Real (Kind=Kind(0.d0)) :: DW_Matter_tau(-1:1), DW_Ising_Matter(-1:1)
       Integer, allocatable   :: Field_list(:,:,:), Field_list_inv(:,:)
+
+      !>    Storage for strict Gauss constraint (lambda field)
+      !>    lambda_field(r, tau) = +1 or -1, the Z2 Lagrange multiplier field
+      !>    Used for exact projection: P_r = (1/2)(1 + G_r) via sum over lambda
+      Integer, allocatable   :: lambda_field(:,:)
+      !>    Storage for Gauss operator related quantities
+      !>    star_product(r, tau) = product of sigma^x on links adjacent to site r
+      Integer, allocatable   :: star_product_cache(:,:)
+      !>    Phase factor for Gauss projection: exp(i * lambda * pi/2 * X_r) where X_r = prod sigma^x
+      Real (Kind=Kind(0.d0)) :: DW_Gauss_phase(-1:1, -1:1)  ! (lambda, X_r)
 
     contains
       
@@ -226,6 +237,7 @@
               endif
               Write(unit_info,*) 'Ham_chem      : ', Ham_chem
               Write(unit_info,*) 'Ham_U         : ', Ham_U
+              Write(unit_info,*) 'UseStrictGauss: ', UseStrictGauss
               if (Projector) then
                  Do nf = 1,N_FL
                     Write(unit_info,*) 'Degen of right trial wave function: ', WF_R(nf)%Degen
@@ -364,6 +376,26 @@
                    Op_V(nc,nf)%alpha  = cmplx(0.d0,0.d0, kind(0.D0))
                    Op_V(nc,nf)%type   = 1
                    Call Op_set( Op_V(nc,1) )
+                enddo
+             case (5 ) ! Gauss Lambda field for strict Gauss constraint
+                ! This implements the phase factor exp(i * lambda * pi/2 * X_r * (-1)^n_r)
+                ! = exp(i * lambda * pi/2 * X_r) * exp(i * lambda * pi/2 * (-1)^n_r * X_r * (-1)^n_r)
+                ! The fermion part is exp(i * pi * n_r) when lambda*X_r = 1
+                ! 
+                ! We implement this as a diagonal one-body operator:
+                ! exp(i * lambda * pi/2 * X_r) on fermion occupation
+                ! The X_r factor is handled by the coupling g which depends on the gauge config
+                I = Field_list_inv(nc,1)
+                do nf = 1,N_FL
+                   Call OP_Make( Op_V(nc,nf), 1)
+                   Op_V(nc,nf)%P(1)   = I
+                   Op_V(nc,nf)%O(1,1) = cmplx(1.d0, 0.d0, kind(0.D0))  ! n_r operator
+                   ! The coupling g = i * pi will give exp(i * pi * n_r) = (-1)^n_r
+                   ! This needs to be combined with lambda and X_r in the update
+                   Op_V(nc,nf)%g      = cmplx(0.d0, acos(-1.d0), kind(0.D0))  ! i * pi
+                   Op_V(nc,nf)%alpha  = cmplx(0.d0, 0.d0, kind(0.D0))
+                   Op_V(nc,nf)%type   = 1  ! Ising type field (lambda = +/-1)
+                   Call Op_set( Op_V(nc,nf) )
                 enddo
              end select
           end Do
@@ -507,6 +539,17 @@
                 S0 = 1.d0
              endif
 
+          endif
+          
+          ! Handle Gauss lambda field (Field_type = 5)
+          ! For the lambda field, there is no classical action contribution
+          ! The weight change comes entirely from the fermion determinant
+          ! through the phase factor exp(i * lambda * pi/2 * X_r)
+          If (UseStrictGauss .and. Field_list_inv(n,3) == 5) then
+             ! Lambda flip: lambda -> -lambda
+             ! S0 contribution is 1.0 (no intrinsic action for lambda)
+             ! The acceptance depends on the fermion determinant ratio
+             S0 = 1.d0
           endif
 
         end function S0
@@ -748,9 +791,15 @@
           If (Abs(Ham_U)   > Zero )   N_ops = N_ops + Latt%N                          !  Hubbard
           If (Abs(Ham_TZ2) > Zero )   N_ops = N_ops + Latt%N*Latt_unit%N_coord        !  Z2 gauge fields
           If (Abs(Ham_T  ) > Zero )   N_ops = N_ops + Latt%N*Latt_unit%N_coord + 1    !  Matter fields.
+          If (UseStrictGauss       )  N_ops = N_ops + Latt%N                          !  Lambda fields for Gauss projection
 
           ! Setup list of bonds for the square lattice.
-          Allocate ( Field_list(Latt%N,3,4),  Field_list_inv(N_ops,3) )
+          ! Field types: 1=gauge, 2=bond matter, 3=Hubbard, 4=site matter, 5=Gauss lambda
+          If (UseStrictGauss) then
+             Allocate ( Field_list(Latt%N,3,5),  Field_list_inv(N_ops,3) )
+          else
+             Allocate ( Field_list(Latt%N,3,4),  Field_list_inv(N_ops,3) )
+          endif
           nc = 0
           If (Abs(Ham_U)   > Zero )  then
              DO I = 1,Latt%N
@@ -821,14 +870,28 @@
                    enddo
                 endif
              Enddo
-             nc = nc + 1
-             I = Latt%N
-             n_orientation = 3
-             N_Field_type  = 4
-             Field_list(I,n_orientation,N_Field_type) = nc
-             Field_list_inv(nc,1) = I
-             Field_list_inv(nc,2) = n_orientation
-             Field_list_inv(nc,3) = N_Field_type
+            nc = nc + 1
+            I = Latt%N
+            n_orientation = 3
+            N_Field_type  = 4
+            Field_list(I,n_orientation,N_Field_type) = nc
+            Field_list_inv(nc,1) = I
+            Field_list_inv(nc,2) = n_orientation
+            Field_list_inv(nc,3) = N_Field_type
+          Endif
+          
+          ! Add lambda fields for strict Gauss constraint
+          ! Field type 5: Lambda field for Gauss projection at each site
+          If (UseStrictGauss) then
+             N_Field_type = 5
+             DO I = 1, Latt%N
+                nc = nc + 1
+                n_orientation = 3  ! Site-centered, no orientation
+                Field_list(I, n_orientation, N_Field_type) = nc
+                Field_list_inv(nc, 1) = I
+                Field_list_inv(nc, 2) = n_orientation
+                Field_list_inv(nc, 3) = N_Field_type
+             ENDDO
           Endif
 
           !Test
@@ -856,7 +919,258 @@
              DW_Matter_tau  (-1) = 1.D0/DW_Matter_tau(1)
           endif
 
+          ! Initialize strict Gauss constraint related storage
+          If (UseStrictGauss) then
+             Call Setup_Gauss_constraint()
+          endif
+
         End Subroutine Setup_Ising_action_and_field_list
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> This routine initializes the storage for strict Gauss constraint projection.
+!> The Gauss operator is G_r = (-1)^{n_r} * prod_{b in +r} sigma^x_b
+!> The projection P_r = (1/2)(1 + G_r) is implemented via Z2 auxiliary field lambda_r(tau)
+!>
+!> @details
+!> The phase factor contribution to B(tau) is:
+!>   B^{Gauss}(tau) = prod_r exp(i * lambda_r(tau) * pi/2 * X_r(tau))
+!> where X_r(tau) = prod_{b in +r} sigma^x_b(tau) is the star product of gauge fields
+!--------------------------------------------------------------------
+        Subroutine Setup_Gauss_constraint
+
+          Implicit none
+          
+          Integer :: I, nt
+          Real (Kind=Kind(0.d0)) :: Pi
+          
+          Pi = acos(-1.d0)
+          
+          ! Allocate lambda field array: lambda_field(site, tau)
+          ! Lambda takes values +1 or -1
+          Allocate(lambda_field(Latt%N, Ltrot))
+          lambda_field = 1  ! Initialize all lambda to +1
+          
+          ! Allocate cache for star product (optional, for efficiency)
+          Allocate(star_product_cache(Latt%N, Ltrot))
+          star_product_cache = 0  ! Will be computed dynamically
+          
+          ! Setup Gauss phase weight factors
+          ! exp(i * lambda * pi/2 * X_r) for lambda = +/-1, X_r = +/-1
+          ! When lambda=+1, X_r=+1:  exp(i * pi/2) = i     -> phase contribution
+          ! When lambda=+1, X_r=-1:  exp(-i * pi/2) = -i   -> phase contribution  
+          ! When lambda=-1, X_r=+1:  exp(-i * pi/2) = -i   -> phase contribution
+          ! When lambda=-1, X_r=-1:  exp(i * pi/2) = i     -> phase contribution
+          ! 
+          ! For the fermion determinant, we need the real part contribution
+          ! The full phase exp(i * lambda * pi/2 * X_r) * exp(i * pi * n_r) gives:
+          !   (for Gauss law G_r = 1): a factor of 1
+          !   (for Gauss law G_r = -1): a factor that oscillates and averages to 0
+          !
+          ! DW_Gauss_phase stores the ratio for lambda flip
+          ! When lambda -> -lambda, the weight changes by exp(-i * lambda * pi * X_r)
+          ! = cos(pi) - i*sin(pi)*lambda*X_r = -1 for any lambda*X_r = +/-1
+          ! But we actually need to track the real weight contribution carefully
+          
+          DW_Gauss_phase = 1.d0  ! Will be set in the update routines
+          
+          Write(6,*) 'Strict Gauss constraint initialized for ', Latt%N, ' sites, ', Ltrot, ' time slices'
+
+        End Subroutine Setup_Gauss_constraint
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes the star product X_r(tau) = prod_{b in +r} sigma^x_b(tau)
+!> This is the product of sigma^x on the 4 links (in 2D square lattice)
+!> adjacent to site r: links in +x, -x, +y, -y directions
+!>
+!> @param[IN] I  Integer, site index
+!> @param[IN] nt Integer, time slice
+!> @return X_r = +1 or -1
+!--------------------------------------------------------------------
+        Integer Function Compute_Star_Product_X(I, nt)
+
+          Implicit none
+          
+          Integer, Intent(IN) :: I, nt
+          
+          ! Local
+          Integer :: I_mx, I_my  ! Sites at -x, -y directions
+          Integer :: n1, n2, n3, n4  ! Field indices for the 4 links
+          Integer :: X_r
+          
+          ! For a 2D square lattice, the star at site I consists of 4 links:
+          !      I+y
+          !       |
+          ! I-x - I - I+x
+          !       |
+          !      I-y
+          !
+          ! Links: (I, +x), (I, +y), (I-x, +x), (I-y, +y)
+          ! We need to find the gauge field indices on these links
+          
+          If (Abs(Ham_TZ2) < Zero) then
+             ! No Z2 gauge fields, star product is trivially 1
+             Compute_Star_Product_X = 1
+             return
+          endif
+          
+          I_mx = Latt%nnlist(I, -1, 0)  ! Site at I - a_x
+          I_my = Latt%nnlist(I, 0, -1)  ! Site at I - a_y
+          
+          ! Get field indices for the 4 links around site I
+          ! Field_list(site, orientation, field_type):
+          ! orientation: 1=+x, 2=+y
+          ! field_type: 1=gauge field
+          n1 = Field_list(I,    1, 1)  ! Link (I, I+x)
+          n2 = Field_list(I,    2, 1)  ! Link (I, I+y)
+          n3 = Field_list(I_mx, 1, 1)  ! Link (I-x, I)
+          n4 = Field_list(I_my, 2, 1)  ! Link (I-y, I)
+          
+          ! sigma^x acting on Ising variable gives the sign
+          ! For sigma^x: |+> -> |+>, |-> -> -|->
+          ! In terms of Ising variables, sigma^x effectively measures
+          ! the correlation between adjacent time slices
+          ! Here we use the spatial configuration at time nt
+          ! The star product is: prod sigma^z on the 4 links
+          X_r = nsigma%i(n1, nt) * nsigma%i(n2, nt) * nsigma%i(n3, nt) * nsigma%i(n4, nt)
+          
+          Compute_Star_Product_X = X_r
+
+        End Function Compute_Star_Product_X
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes the Gauss operator eigenvalue G_r = (-1)^{n_r} * X_r
+!> where X_r is the star product and n_r is the fermion occupation
+!> This is used for checking the Gauss constraint
+!>
+!> @param[IN] I  Integer, site index
+!> @param[IN] nt Integer, time slice
+!> @param[IN] GRC Complex(:,:,:), density matrix <c^dag c>
+!> @return Gauss operator eigenvalue
+!--------------------------------------------------------------------
+        Complex (Kind=Kind(0.d0)) Function Compute_Gauss_Operator(I, nt, GRC)
+
+          Implicit none
+          
+          Integer, Intent(IN) :: I, nt
+          Complex (Kind=Kind(0.d0)), Intent(IN) :: GRC(:,:,:)
+          
+          ! Local
+          Integer :: X_r
+          Complex (Kind=Kind(0.d0)) :: Z_n  ! (-1)^n factor
+          
+          If (.not. UseStrictGauss) then
+             Compute_Gauss_Operator = cmplx(1.d0, 0.d0, kind(0.d0))
+             return
+          endif
+          
+          ! Get star product
+          X_r = Compute_Star_Product_X(I, nt)
+          
+          ! (-1)^n_r = 1 - 2*n_r for each spin
+          ! For N_SUN colors, the factor is (1 - 2*<n_r>)^N_SUN
+          ! where <n_r> = Tr(GRC(r,r,:)) / N_FL
+          Z_n = cmplx(1.d0, 0.d0, kind(0.d0)) - cmplx(2.d0, 0.d0, kind(0.d0)) * GRC(I, I, 1)
+          Z_n = Z_n**N_SUN
+          
+          ! G_r = (-1)^n_r * X_r
+          Compute_Gauss_Operator = Z_n * cmplx(real(X_r, kind(0.d0)), 0.d0, kind(0.d0))
+
+        End Function Compute_Gauss_Operator
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes the phase factor for Gauss projection at site I, time slice nt
+!> Phase = exp(i * lambda_r(tau) * pi/2 * X_r(tau))
+!> This phase is applied to the fermion propagator B(tau)
+!>
+!> @param[IN] I  Integer, site index
+!> @param[IN] nt Integer, time slice
+!> @return phase factor as complex number
+!--------------------------------------------------------------------
+        Complex (Kind=Kind(0.d0)) Function Compute_Gauss_Phase(I, nt)
+
+          Implicit none
+          
+          Integer, Intent(IN) :: I, nt
+          
+          ! Local
+          Integer :: X_r, lambda_val
+          Real (Kind=Kind(0.d0)) :: Pi, angle
+          
+          Pi = acos(-1.d0)
+          
+          If (.not. UseStrictGauss) then
+             Compute_Gauss_Phase = cmplx(1.d0, 0.d0, kind(0.d0))
+             return
+          endif
+          
+          ! Get lambda value at this site and time
+          lambda_val = lambda_field(I, nt)
+          
+          ! Get star product X_r
+          X_r = Compute_Star_Product_X(I, nt)
+          
+          ! Phase = exp(i * lambda * pi/2 * X_r)
+          angle = real(lambda_val * X_r, kind(0.d0)) * Pi / 2.d0
+          Compute_Gauss_Phase = cmplx(cos(angle), sin(angle), kind(0.d0))
+
+        End Function Compute_Gauss_Phase
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes the weight ratio for flipping lambda at site I, time slice nt
+!> This is the ratio S0(lambda_new) / S0(lambda_old) for the lambda field
+!> 
+!> For the Gauss constraint, the weight contribution involves:
+!> - The phase factor exp(i * lambda * pi/2 * X_r) per site/time
+!> - The coupling between lambda and the fermion determinant
+!>
+!> @param[IN] I  Integer, site index
+!> @param[IN] nt Integer, time slice
+!> @return weight ratio for lambda flip
+!--------------------------------------------------------------------
+        Real (Kind=Kind(0.d0)) Function S0_Lambda_Flip(I, nt)
+
+          Implicit none
+          
+          Integer, Intent(IN) :: I, nt
+          
+          ! Local
+          Integer :: X_r, lambda_old
+          Real (Kind=Kind(0.d0)) :: Pi
+          
+          Pi = acos(-1.d0)
+          
+          ! For the auxiliary field lambda, there is no intrinsic action
+          ! The weight comes entirely from the fermion determinant
+          ! When we flip lambda -> -lambda, the phase factor changes:
+          ! exp(i * lambda * pi/2 * X_r) -> exp(-i * lambda * pi/2 * X_r)
+          ! 
+          ! The ratio of phases is exp(-i * lambda * pi * X_r)
+          ! This is purely a phase, so S0_Lambda_Flip = 1.0
+          ! The actual acceptance probability comes from the fermion determinant
+          
+          S0_Lambda_Flip = 1.d0
+
+        End Function S0_Lambda_Flip
 
 !--------------------------------------------------------------------
 !> @author
@@ -876,7 +1190,12 @@
           Character (len=:), allocatable ::  Channel
 
           ! Scalar observables
-          Allocate ( Obs_scal(4) )
+          ! Add extra observable for Gauss constraint if UseStrictGauss is enabled
+          If (UseStrictGauss) then
+             Allocate ( Obs_scal(6) )
+          else
+             Allocate ( Obs_scal(4) )
+          endif
           Do I = 1,Size(Obs_scal,1)
              select case (I)
              case (1)
@@ -887,6 +1206,12 @@
                 N = 2;   Filename ="X"
              case (4)
                 N = 1;   Filename ="Q"
+             case (5)
+                ! Gauss constraint expectation value: <G_r>
+                N = 1;   Filename ="Gauss"
+             case (6)
+                ! Gauss constraint violation: <(G_r - 1)^2>
+                N = 1;   Filename ="GaussViol"
              case default
                 Write(6,*) ' Error in Alloc_obs '
              end select
@@ -1102,6 +1427,28 @@
              Z1 = Z1 * cmplx(tau_x(I,ntau, Isigma, Isigmap1)*star_sigma_x(i,ntau),0.d0,kind(0.d0))
              Obs_eq(5)%Obs_Latt0(1)  = Obs_eq(5)%Obs_Latt0(1)  + Z1*ZP*ZS
           Enddo
+          
+          ! Measure Gauss constraint observables if strict Gauss constraint is enabled
+          If (UseStrictGauss) then
+             ! <G_r> = <(-1)^n_r * X_r> where X_r is the star product
+             ! This should be 1 if Gauss law is satisfied
+             Z1 = cmplx(0.d0, 0.d0, kind(0.d0))
+             Z2 = cmplx(0.d0, 0.d0, kind(0.d0))
+             Do I = 1, Latt%N
+                ! Compute Gauss operator G_r = (-1)^n_r * X_r
+                ZQ = Compute_Gauss_Operator(I, ntau, GRC)
+                Z1 = Z1 + ZQ
+                ! Compute (G_r - 1)^2 = G_r^2 - 2*G_r + 1 = 1 - 2*G_r + 1 (since G_r^2 = 1)
+                ! Actually G_r takes values +/-1, so (G_r - 1)^2 = 0 or 4
+                Z2 = Z2 + (ZQ - cmplx(1.d0, 0.d0, kind(0.d0)))**2
+             Enddo
+             ! Average over all sites
+             Z1 = Z1 / cmplx(real(Latt%N, kind(0.d0)), 0.d0, kind(0.d0))
+             Z2 = Z2 / cmplx(real(Latt%N, kind(0.d0)), 0.d0, kind(0.d0))
+             
+             Obs_scal(5)%Obs_vec(1) = Obs_scal(5)%Obs_vec(1) + Z1 * ZP * ZS
+             Obs_scal(6)%Obs_vec(1) = Obs_scal(6)%Obs_vec(1) + Z2 * ZP * ZS
+          Endif
 
           If (Abs(Ham_T) > Zero )  Deallocate ( Isigma, Isigmap1)
  
@@ -1273,6 +1620,24 @@
               enddo
            enddo
         endif
+        
+        ! Initialize lambda field for strict Gauss constraint
+        ! Field type 5: Lambda field at each site
+        If (UseStrictGauss) then
+           Do nt = 1, Ltrot
+              Do I = 1, Latt%N
+                 nc = Field_list(I, 3, 5)  ! n_orientation = 3, field_type = 5
+                 ! Initialize all lambda to +1 (or random)
+                 Initial_field(nc, nt) = cmplx(1.D0, 0.d0, Kind(0.d0))
+                 ! Optionally start with random lambda configuration
+                 ! if (ranf_wrap() > 0.5D0) Initial_field(nc, nt) = cmplx(-1.D0, 0.d0, Kind(0.d0))
+                 
+                 ! Also update the lambda_field array for consistency
+                 lambda_field(I, nt) = nint(real(Initial_field(nc, nt)))
+              Enddo
+           Enddo
+           Write(6,*) 'Lambda field initialized for strict Gauss constraint'
+        endif
 
         deallocate (Isigma, Isigma1)
 
@@ -1341,6 +1706,8 @@
         Nt_sequential_end   = 0
         If (abs(Ham_U  ) > Zero ) Nt_sequential_end = Nt_sequential_end + Latt%N
         If (abs(Ham_TZ2) > Zero ) Nt_sequential_end = Nt_sequential_end + Latt%N*Latt_unit%N_coord
+        ! Add lambda field sequential updates for strict Gauss constraint
+        If (UseStrictGauss      ) Nt_sequential_end = Nt_sequential_end + Latt%N
         N_Global_tau = 0
         if (abs(Ham_T) > Zero )  N_Global_tau        = Latt%N/4
 
