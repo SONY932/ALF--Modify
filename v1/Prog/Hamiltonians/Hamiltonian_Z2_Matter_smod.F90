@@ -70,7 +70,7 @@
         procedure, nopass :: Get_Delta_S0_global
         procedure, nopass :: S0
         ! Strict Gauss constraint (PRX 10.041057 Appendix A)
-        procedure, nopass :: Apply_P_Lambda_To_Green
+        procedure, nopass :: Apply_P_Lambda_To_B
         procedure, nopass :: Use_Strict_Gauss
 #ifdef HDF5
         procedure, nopass :: write_parameters_hdf5
@@ -1952,71 +1952,64 @@
 !> The modification is: G_ij -> lambda_i * G_ij * lambda_j
 !> This accounts for the P[lambda] in det(1 + P[lambda] * B_total).
 !>
-!> Note: This is a simplified implementation. For full accuracy,
-!> the P[lambda] should be applied at the wrap-up level.
+!> This is the CORRECT implementation following PRX 10.041057 Appendix A:
+!>   B'_M = P[lambda] * B_M  (left multiply P[lambda] on final time slice)
 !>
-!> @param [INOUT] GR   Complex(:,:)
-!> @param [IN] nf_eff   Integer, effective flavor index
+!> This gives B_total' = P[lambda] * B_total, so G = (1 + P[lambda]*B_total)^{-1}
+!>
+!> @param [INOUT] B_slice   Complex(:,:)
+!>   B-matrix for time slice nt=Ltrot. Modified in place.
+!> @param [IN] nf   Integer, flavor index
 !--------------------------------------------------------------------
-        Subroutine Apply_P_Lambda_To_Green(GR, nf_eff)
+        Subroutine Apply_P_Lambda_To_B(B_slice, nf)
           !
-          ! ⚠️ WARNING: This is a SIMPLIFIED implementation!
+          ! ✅ CORRECT IMPLEMENTATION (PRX 10.041057 Appendix A)
           !
-          ! The correct PRX A6 relation is:
-          !   G' = (1 + P*B)^{-1}
+          ! Left multiply P[lambda] on the B-matrix at the final time slice:
+          !   B'_M(i, :) = lambda_i * B_M(i, :)
           !
-          ! But this subroutine computes:
-          !   G' = P * G = P * (1 + B)^{-1}
+          ! This gives B_total' = P[lambda] * B_total
+          ! so the Green function becomes G = (1 + P[lambda] * B_total)^{-1}
           !
-          ! These are NOT equivalent unless all lambda_i = +1!
-          !
-          ! For the mathematically correct implementation, one needs to either:
-          ! (A) Modify B_total before CGR: B_eff = P * B, then G = (1+B_eff)^{-1}
-          ! (B) Use Woodbury formula: G' = (I + G*(P-I)*B)^{-1} * G
-          !
-          ! The current simplified implementation is only approximate when lambda_i = -1.
-          ! See Z2_Strict_Gauss_Constraint.md Section 3.4.5 for details.
+          ! Physical meaning:
+          !   lambda_i = +1: periodic boundary condition at site i
+          !   lambda_i = -1: antiperiodic boundary condition at site i
           !
 
           Implicit none
           
-          Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: GR(:,:)
-          Integer, INTENT(IN) :: nf_eff
+          Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: B_slice(:,:)
+          Integer, INTENT(IN) :: nf
           
           ! Local
           Integer :: I, J, N_dim
-          Real (Kind=Kind(0.d0)) :: lambda_i, lambda_j
+          Real (Kind=Kind(0.d0)) :: lambda_i
           
           If (.not. UseStrictGauss) return
           
-          N_dim = size(GR, 1)
+          N_dim = size(B_slice, 1)
           
-          ! Apply P[lambda] transformation to Green function (SIMPLIFIED VERSION)
-          ! This computes G' = P * G, which is an approximation.
-          ! The correct formula for det(1 + P*B) requires Woodbury correction.
-          !
-          ! Boundary condition interpretation:
-          ! - lambda_i = +1: periodic BC at site i
-          ! - lambda_i = -1: antiperiodic BC at site i
+          ! Apply P[lambda] transformation to B-matrix (left multiplication)
+          ! B'(i, :) = lambda_i * B(i, :)
           
           Do I = 1, min(Latt%N, N_dim)
              lambda_i = real(lambda_field(I), kind(0.d0))
              Do J = 1, N_dim
-                GR(I, J) = lambda_i * GR(I, J)
+                B_slice(I, J) = lambda_i * B_slice(I, J)
              Enddo
           Enddo
           
-          ! For two spin degrees of freedom
+          ! For two spin degrees of freedom (spin-up at i, spin-down at i+N)
           If (N_dim >= 2 * Latt%N) then
              Do I = 1, Latt%N
                 lambda_i = real(lambda_field(I), kind(0.d0))
                 Do J = 1, N_dim
-                   GR(I + Latt%N, J) = lambda_i * GR(I + Latt%N, J)
+                   B_slice(I + Latt%N, J) = lambda_i * B_slice(I + Latt%N, J)
                 Enddo
              Enddo
           Endif
 
-        End Subroutine Apply_P_Lambda_To_Green
+        End Subroutine Apply_P_Lambda_To_B
 
 !--------------------------------------------------------------------
 !> @author

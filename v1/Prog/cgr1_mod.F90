@@ -34,8 +34,8 @@ module cgr1_mod
   contains
 
       SUBROUTINE CGR(PHASE,NVAR, GRUP, udvr, udvl)
-      !> Note: Strict Gauss constraint (PRX 10.041057) support added.
-      !> After computing GRUP, call ham%Apply_P_Lambda_To_Green if enabled.
+      !> Note: Strict Gauss constraint (PRX 10.041057) P[lambda] is now applied
+      !> at B-slice level in wrapur_mod.F90, not here. See Apply_P_Lambda_To_B.
 
 !--------------------------------------------------------------------
 !> @author 
@@ -56,7 +56,6 @@ module cgr1_mod
 !--------------------------------------------------------------------
 
         Use UDV_State_mod
-        Use Hamiltonian_main, only: ham
 
 #if (defined(STAB2) || defined(STAB1)) && !defined(STABLOG)
         Use UDV_Wrap_mod
@@ -174,24 +173,13 @@ module cgr1_mod
         CALL udvlocal%dealloc
         Deallocate(TPUP,TPUP1,TPUPM1, IPVT )
         
-        ! Apply P[lambda] for strict Gauss constraint (PRX 10.041057 Appendix A)
-        !
-        ! ⚠️ WARNING: SIMPLIFIED IMPLEMENTATION
-        ! This computes G' = P * G, but the correct PRX A6 formula is:
-        !   G' = (1 + P*B)^{-1}  ≠  P * (1+B)^{-1}
-        !
-        ! For mathematically correct implementation, see Section 3.4.5 of
-        ! Z2_Strict_Gauss_Constraint.md for Woodbury formula approach.
-        !
-        If (ham%Use_Strict_Gauss()) then
-           Call ham%Apply_P_Lambda_To_Green(GRUP, 1)
-        Endif
+        ! P[lambda] for strict Gauss constraint is now applied at B-slice level
+        ! in wrapur_mod.F90, not here. See Apply_P_Lambda_To_B in Hamiltonian.
 
 #else
 
         USE MyMats
         USE QDRP_mod
-        Use Hamiltonian_main, only: ham
         
         Implicit None
         !Arguments.
@@ -456,18 +444,8 @@ module cgr1_mod
         ENDIF
         Deallocate(TPUP, DUP, IPVT, VISITED, RHS)
         
-        ! Apply P[lambda] for strict Gauss constraint (PRX 10.041057 Appendix A)
-        !
-        ! ⚠️ WARNING: SIMPLIFIED IMPLEMENTATION
-        ! This computes G' = P * G, but the correct PRX A6 formula is:
-        !   G' = (1 + P*B)^{-1}  ≠  P * (1+B)^{-1}
-        !
-        ! For mathematically correct implementation, see Section 3.4.5 of
-        ! Z2_Strict_Gauss_Constraint.md for Woodbury formula approach.
-        !
-        If (ham%Use_Strict_Gauss()) then
-           Call ham%Apply_P_Lambda_To_Green(GRUP, 1)
-        Endif
+        ! P[lambda] for strict Gauss constraint is now applied at B-slice level
+        ! in wrapur_mod.F90, not here. See Apply_P_Lambda_To_B in Hamiltonian.
 #endif
         
       END SUBROUTINE CGR

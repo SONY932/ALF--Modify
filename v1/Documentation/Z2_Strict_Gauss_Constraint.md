@@ -231,57 +231,49 @@ G = inverse(Ginv)
 ! 会导致 P[λ] 被乘了两次
 ```
 
-#### 3.4.5 与 CGR 流程的集成方案
+#### 3.4.5 正确的实现方案（已实现）
 
-在 ALF 中，最终 Green function 由 CGR 输出。
+> ✅ **战略选择：把 P[λ] 吸收进最后一个时间片的 B 矩阵**
+>
+> 只要让 ALF 看到的时间片矩阵变成：
+> $$B'_M = P[\lambda] \cdot B_M, \quad B'_k = B_k\ (k < M)$$
+>
+> 则传播子变成：
+> $$\mathcal{B}' = B'_M \cdots B'_1 = P[\lambda] \cdot B_M \cdots B_1 = P[\lambda] \cdot \mathcal{B}$$
+>
+> CGR 完全不用改，而 PRX 的边界条件被严格实现。
 
-> 🚨 **关键数学问题**
->
-> 设 $G = (1+B)^{-1}$（CGR 输出），我们想要 $G' = (1+PB)^{-1}$。
->
-> **这两者的关系不是简单的 $G' = P \cdot G$！**
->
-> 正确的关系是（设 $\Delta = P - I$）：
-> $$G' = (I + G \cdot \Delta \cdot B)^{-1} \cdot G$$
->
-> 当所有 $\lambda_i = +1$ 时 $\Delta = 0$，此时 $G' = G$。
-> 当某些 $\lambda_i = -1$ 时，$\Delta_{ii} = -2$，需要 rank-k 更新。
+**实现位置：`wrapur_mod.F90`**
 
-**方案 A：修改 B_total 构造（推荐 - 数学上正确）**
-
-在构造 B_total 时直接乘 P[λ]，然后正常计算 Green function：
+在 `WRAPUR` 的时间片循环中，当 `nt == Ltrot` 时，在所有 Op_V 处理完后调用：
 ```fortran
-! 在构造完整 B_total 后、传入 CGR 前
-B_eff = P[lambda] * B_total
-! 然后 CGR 计算 G = (1 + B_eff)^{-1}
+DO NT = NTAU + 1, NTAU1
+   Call Hop_mod_mmthr(TMP,nf,nt)
+   Do n = 1,Size(Op_V,1)
+      Call Op_mmultR(Tmp,Op_V(n,nf),nsigma%f(n,nt),'n',nt)
+   ENDDO
+   ! ✅ Apply P[lambda] at time boundary (nt = Ltrot)
+   If (nt == Ltrot .and. ham%Use_Strict_Gauss()) then
+      Call ham%Apply_P_Lambda_To_B(TMP, nf)
+   Endif
+ENDDO
 ```
 
-这需要修改 ALF 的 wrap-up 流程。
+**核心函数：`Apply_P_Lambda_To_B`**
 
-**方案 B：后修正 Green function（需要 B_total）**
-
-如果已经计算了 $G = (1+B)^{-1}$，可以用 Woodbury 公式修正：
 ```fortran
-! 设 k 个格点有 lambda_i = -1
-! Delta 是 (N x k) 矩阵，(Delta)_{i,j} = -2 如果 i 是第 j 个 lambda=-1 的格点
-! V^T 是 (k x N) 矩阵，V^T = (B 的对应行)
-
-! G' = (I + G*Delta*V^T)^{-1} * G
-! 用 Sherman-Morrison-Woodbury 公式计算
+Subroutine Apply_P_Lambda_To_B(B_slice, nf)
+    ! Left multiply P[lambda] on B-matrix: B'(i,:) = lambda_i * B(i,:)
+    Do I = 1, N_sites
+        B_slice(I, :) = lambda_field(I) * B_slice(I, :)
+        ! For two spins:
+        B_slice(I + N_sites, :) = lambda_field(I) * B_slice(I + N_sites, :)
+    Enddo
+End Subroutine
 ```
 
-**方案 C：简化实现（近似 - 仅当 λ 不经常翻转时）**
-
-如果大多数 $\lambda_i = +1$，可以使用当前的简化实现：
-```fortran
-! 当前实现：G' = P * G
-! 这仅在 lambda_i 很少为 -1 时是近似正确的
-! 严格来说这不等价于 (1+PB)^{-1}
-call ham%Apply_P_Lambda_To_Green(GRUP, nf_eff)
-```
-
-> ⚠️ **当前代码状态**：实现的是方案 C（简化版），不是严格正确的 PRX A6 实现。
-> 完整实现需要方案 A 或方案 B。
+这样 CGR 输出的 Green function 自动满足：
+$$G = (1 + P[\lambda] \cdot \mathcal{B})^{-1}$$
 
 #### 3.4.4 两自旋自由度的处理
 
@@ -340,16 +332,21 @@ $$R_{\text{ferm}}^{(\lambda)} = \frac{\det(1 + P[\lambda^{\text{new}}] \mathcal{
 **总比率**：
 $$R^{(\lambda)} = R_{\text{bose}}^{(\lambda)} \cdot R_{\text{ferm}}^{(\lambda)}$$
 
-#### 5.1.1 情况 A：↑↓ 自旋完全独立（block-diagonal 费米子矩阵）
+#### 5.1.1 关键洞察：λ 翻转 = B_M 的 rank-1/rank-2 更新
 
-若费米子矩阵是 block-diagonal（↑↓ 解耦，无 SO coupling）：
-$$B = \begin{pmatrix} B^\uparrow & 0 \\ 0 & B^\downarrow \end{pmatrix}$$
+由于 P[λ] 被吸收进 $B_M$（见模块 3.4.5），翻转 $\lambda_i$ 的效果是：
+$$B'_M(i,:) = -B_M(i,:)$$
 
-可以对每个自旋分开做 **rank-1** 更新：
-$$R_{\text{ferm}} = R_{\text{ferm}}^\uparrow \times R_{\text{ferm}}^\downarrow$$
+这正好是标准 DQMC 里最适合做 Sherman–Morrison 的场景！
 
-其中单自旋的 rank-1 公式：
-$$R_{\text{ferm}}^\sigma = 1 - 2\lambda_i^{\text{old}} \cdot (B^\sigma \cdot G^\sigma)_{ii}$$
+#### 5.1.2 情况 A：↑↓ 自旋完全独立（block-diagonal）
+
+若费米子矩阵是 block-diagonal，可以对每个自旋分开做 **rank-1** 更新：
+
+**单自旋的 rank-1 公式**：
+$$R_{\text{ferm}}^\sigma = 1 - 2\lambda_i^{\text{old}} \cdot (B_M G_M)_{ii}$$
+
+其中 $G_M$ 是 **最后时间片 τ=M 的等时 Green function**。
 
 **Sherman-Morrison 更新**（单自旋）：
 
@@ -357,52 +354,51 @@ $$G^\sigma_{\text{new}} = G^\sigma_{\text{old}} - \frac{G^\sigma_{\text{old}} \c
 
 其中：
 - $u = (-2 \lambda_i^{\text{old}}) e_i$
-- $w^T = B^\sigma_{\text{row }i}$
+- $w^T = (B_M)_{\text{row }i}$（$B_M$ 的第 i 行）
 
-#### 5.1.2 情况 B：自旋混合（SO coupling, pair-hopping 等）
+两自旋 decoupled：$R_{\text{ferm}} = R_{\text{ferm}}^\uparrow \times R_{\text{ferm}}^\downarrow$
 
-若存在自旋混合项，费米子矩阵维度是 2N，翻转 λ_i 修改两行：第 i 行和第 i+N 行。
+#### 5.1.3 情况 B：自旋混合（SO coupling, pair-hopping 等）
 
-必须使用 **rank-2** 更新：
+翻转 λ_i 时，$B_M$ 的第 i 行和第 i+N 行都要乘 -1，这是 **rank-2** 更新。
 
 **费米子行列式比率**：
-$$R_{\text{ferm}} = \det(I_2 + V^T \cdot G \cdot U)$$
+$$R_{\text{ferm}} = \det(I_2 + V^T \cdot G_M \cdot U)$$
 
 其中：
 $$U = \begin{pmatrix} u_\uparrow & 0 \\ 0 & u_\downarrow \end{pmatrix}_{2N \times 2}, \quad
-V = \begin{pmatrix} B_{\text{row }i} \\ B_{\text{row }i+N} \end{pmatrix}^T_{2N \times 2}$$
-
-这是一个 **2×2 行列式**，计算成本 O(1)。
+V = \begin{pmatrix} (B_M)_{\text{row }i} \\ (B_M)_{\text{row }i+N} \end{pmatrix}^T_{2N \times 2}$$
 
 **Sherman-Morrison rank-2 更新**：
-$$G_{\text{new}} = G - G \cdot U \cdot (I_2 + V^T \cdot G \cdot U)^{-1} \cdot V^T \cdot G$$
+$$G_{\text{new}} = G_M - G_M \cdot U \cdot (I_2 + V^T \cdot G_M \cdot U)^{-1} \cdot V^T \cdot G_M$$
 
-#### 5.1.3 ALF 实现：独立 λ 更新循环
+#### 5.1.4 ALF 实现：Sweep_Lambda 循环
 
 ```fortran
 !> λ 更新：独立循环遍历所有 site，不遍历 τ
-!> 注意：此示例仅适用于单自旋 / ↑↓ 解耦的情况
-subroutine Update_All_Lambda(G, B_total, N_sites, N_dim)
-    complex(8), intent(inout) :: G(:,:)
-    complex(8), intent(in) :: B_total(:,:)
+!> 需要 G_M (最后时间片的等时 Green) 和 B_M (最后时间片的 B 矩阵)
+subroutine Sweep_Lambda(G_M, B_M, N_sites, N_dim)
+    complex(8), intent(inout) :: G_M(:,:)
+    complex(8), intent(in) :: B_M(:,:)
     integer, intent(in) :: N_sites, N_dim
     
     integer :: i
     real(8) :: R_bose, R_tot
-    complex(8) :: R_ferm, BG_ii
+    complex(8) :: R_ferm, BG_i(N_dim)
     integer :: tau_z_0, tau_z_M1, lambda_old
     
     ! 遍历所有 site（不是时间片！）
     do i = 1, N_sites
-        ! 计算 R_bose（PRX A6）
-        tau_z_0 = Get_Tau_Z_At_Time_0(i)
+        ! --- 玻色权重比率 PRX A6 ---
+        tau_z_0  = Get_Tau_Z_At_Time_0(i)
         tau_z_M1 = Get_Tau_Z_At_Time_M1(i)
         lambda_old = lambda_field(i)
         R_bose = exp(2.0d0 * Gamma_Gauss * tau_z_0 * tau_z_M1 * lambda_old)
         
-        ! 计算 R_ferm（单自旋 rank-1）
-        BG_ii = sum(B_total(i,:) * G(:,i))
-        R_ferm = 1.0d0 - 2.0d0 * lambda_old * BG_ii
+        ! --- 费米子权重比率（基于 B_M 和 G_M）---
+        ! 计算 B_M * G_M 的第 i 行
+        BG_i(:) = matmul(B_M(i, :), G_M)
+        R_ferm = 1.0d0 - 2.0d0 * lambda_old * BG_i(i)
         
         ! Metropolis 接受/拒绝
         R_tot = R_bose * abs(R_ferm)
@@ -410,11 +406,13 @@ subroutine Update_All_Lambda(G, B_total, N_sites, N_dim)
             ! 更新 lambda（site-only 变量）
             lambda_field(i) = -lambda_old
             ! Sherman-Morrison 更新 Green function
-            call Update_Green_SM_Lambda(G, i, B_total, N_dim, R_ferm)
+            call Update_Green_SM_Lambda(G_M, i, B_M, N_dim, R_ferm)
         endif
     enddo
 end subroutine
 ```
+
+> **关键点**：λ 更新只依赖**最后时间片**的 Green 与 B_M，不需要遍历所有 τ。
 
 ### 5.2 更新 τ 自旋
 
@@ -753,21 +751,26 @@ detM = det(Ginv)
    - `S0` 函数已使用 `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` 计算玻色权重
    - 费米子部分通过标准的 Green function 更新机制处理
 
-#### 🔴 高优先级 - 关键问题
+#### ✅ 已完成 - P[λ] 正确实现
 
-1. **P[λ] 实现的数学正确性问题** ⚠️
-   - **问题**：当前实现 `G' = P * G` 不等于正确的 `G' = (1+PB)^{-1}`
-   - **影响**：当某些 λ_i = -1 时，Green function 和行列式计算不准确
-   - **解决方案选项**：
-     - (A) 修改 ALF wrap-up 流程，在 B_total 上乘 P 后再传入 CGR
-     - (B) 使用 Woodbury 公式后修正：`G' = (I + G*(P-I)*B)^{-1} * G`
-   - **当前状态**：简化实现，仅在所有 λ_i = +1 时严格正确
+1. **P[λ] 在 B 矩阵层实现** ✅
+   - **位置**：`wrapur_mod.F90` 在 `nt == Ltrot` 时调用 `ham%Apply_P_Lambda_To_B`
+   - **函数**：`Hamiltonian_Z2_Matter_smod.F90` 中的 `Apply_P_Lambda_To_B`
+   - **效果**：$B'_M = P[\lambda] \cdot B_M$，从而 $G = (1 + P[\lambda] \cdot \mathcal{B})^{-1}$
+   - **已删除**：错误的 `Apply_P_Lambda_To_Green` 及其在 `cgr1_mod.F90` 中的调用
 
-2. **λ 更新循环的位置**
+#### 🔴 高优先级 - 待实现
+
+2. **λ 更新的 Sherman-Morrison 机制**
+   - λ 翻转只改变 $B_M$ 的第 i 行（和 i+N 行）
+   - 需要实现基于最后时间片 $G_M$ 和 $B_M$ 的 rank-1/rank-2 更新
+   - 行列式比率：$R_{\text{ferm}} = 1 - 2\lambda_i^{\text{old}} (B_M G_M)_{ii}$
+
+3. **独立的 Sweep_Lambda 循环**
    - λ 是 τ-independent 的 site-only 变量
-   - 需要在 MC sweep 中添加独立的 `Update_All_Lambda` 循环
-   - 这个循环只遍历 site，不遍历 τ
-   - **不使用 Field_type=5**，λ 不是 nsigma/ntau 数组的一部分
+   - 需要在 MC sweep 中添加独立的 `Sweep_Lambda` 循环
+   - 只遍历 site，不遍历 τ
+   - **不使用 Field_type=5**
 
 #### 🟡 中优先级
 

@@ -160,8 +160,9 @@
         procedure, nopass :: GR_reconstruction => GR_reconstruction_base
         procedure, nopass :: GRT_reconstruction => GRT_reconstruction_base
         procedure, nopass :: Apply_B_HMC => Apply_B_HMC_base
-        !> Apply P[lambda] matrix for strict Gauss constraint (PRX 10.041057 Appendix A)
-        procedure, nopass :: Apply_P_Lambda_To_Green => Apply_P_Lambda_To_Green_base
+        !> Apply P[lambda] to B-matrix at boundary for strict Gauss constraint (PRX 10.041057 Appendix A)
+        !> This is the CORRECT implementation: B'_M = P[lambda] * B_M
+        procedure, nopass :: Apply_P_Lambda_To_B => Apply_P_Lambda_To_B_base
         procedure, nopass :: Use_Strict_Gauss => Use_Strict_Gauss_base
 #ifdef HDF5
         procedure, nopass :: write_parameters_hdf5 => write_parameters_hdf5_base
@@ -839,33 +840,36 @@
 !> ALF Collaboration
 !>
 !> @brief
-!> Applies P[lambda] modification to Green function for strict Gauss constraint.
+!> Applies P[lambda] to B-matrix at time boundary for strict Gauss constraint.
 !> Following PRX 10.041057 Appendix A:
-!>   G_eff = (1 + P[lambda] * B_total)^{-1}
+!>   B'_M = P[lambda] * B_M  (left multiply P[lambda] on final time slice B-matrix)
+!>
+!> This gives the correct propagator: B_total' = P[lambda] * B_total
+!> so that G = (1 + P[lambda] * B_total)^{-1}
 !>
 !> This base implementation does nothing.
 !> Override in Hamiltonian submodule for models with Gauss constraint.
 !>
-!> @param [INOUT] GR   Complex(:,:,:)
+!> @param [INOUT] B_slice   Complex(:,:)
 !> \verbatim
-!>  Green function: GR(I,J,nf) = <c_{I,nf } c^{dagger}_{J,nf } > on time slice ntau
-!>  Modified in place to apply P[lambda] correction.
+!>  B-matrix for time slice nt=Ltrot. Modified in place: B'_M = P[lambda] * B_M
+!>  P[lambda] is diagonal with P_ii = lambda_i
 !> \endverbatim
-!> @param [IN] nf_eff   Integer
+!> @param [IN] nf   Integer
 !> \verbatim
-!>  Effective flavor index
+!>  Flavor index
 !> \endverbatim
 !-------------------------------------------------------------------
-         Subroutine Apply_P_Lambda_To_Green_base(GR, nf_eff)
+         Subroutine Apply_P_Lambda_To_B_base(B_slice, nf)
            Implicit none
            
-           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: GR(:,:)
-           Integer, INTENT(IN) :: nf_eff
+           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: B_slice(:,:)
+           Integer, INTENT(IN) :: nf
            
            ! Default implementation: do nothing
            ! Override in Hamiltonian submodule for strict Gauss constraint
            
-         end Subroutine Apply_P_Lambda_To_Green_base
+         end Subroutine Apply_P_Lambda_To_B_base
 
 #ifdef HDF5
          subroutine write_parameters_hdf5_base(filename)
