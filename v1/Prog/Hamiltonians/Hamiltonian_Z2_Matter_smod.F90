@@ -1109,7 +1109,7 @@
           Integer, Intent(IN) :: I, nt
           
           ! Local
-          Integer :: X_r, lambda_val
+          Integer :: X_r, lambda_val, nc_lambda
           Real (Kind=Kind(0.d0)) :: Pi, angle
           
           Pi = acos(-1.d0)
@@ -1119,8 +1119,11 @@
              return
           endif
           
-          ! Get lambda value at this site and time
-          lambda_val = lambda_field(I, nt)
+          ! Get lambda value at this site and time from nsigma%i
+          ! Use Field_list(I, 3, 5) to get the field index for lambda at site I
+          ! This ensures we read the current value that is synchronized during MC updates
+          nc_lambda = Field_list(I, 3, 5)
+          lambda_val = nsigma%i(nc_lambda, nt)
           
           ! Get star product X_r
           X_r = Compute_Star_Product_X(I, nt)
@@ -1632,7 +1635,9 @@
                  ! Optionally start with random lambda configuration
                  ! if (ranf_wrap() > 0.5D0) Initial_field(nc, nt) = cmplx(-1.D0, 0.d0, Kind(0.d0))
                  
-                 ! Also update the lambda_field array for consistency
+                 ! Note: lambda_field array is only for debugging/legacy purposes
+                 ! The actual lambda values are read from nsigma%i during MC updates
+                 ! via Field_list(I, 3, 5) in Compute_Gauss_Phase
                  lambda_field(I, nt) = nint(real(Initial_field(nc, nt)))
               Enddo
            Enddo
