@@ -73,6 +73,7 @@
         procedure, nopass :: Apply_P_Lambda_To_B
         procedure, nopass :: Use_Strict_Gauss
         procedure, nopass :: Sweep_Lambda
+        procedure, nopass :: GaussViol_Diagnostic => Measure_GaussViolation_Diagnostic
 #ifdef HDF5
         procedure, nopass :: write_parameters_hdf5
 #endif
@@ -1193,7 +1194,22 @@
 !>
 !> @brief
 !> Computes tau_z at time slice 0 for site I.
-!> This is needed for the PRX A6 boundary coupling.
+!> This is needed for the PRX A6 boundary coupling:
+!>   W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
+!>
+!> @details
+!> In ALF's discretization with M = Ltrot time slices:
+!>   - nt = 1      corresponds to tau = 0+  (right after tau = 0 boundary)
+!>   - nt = Ltrot  corresponds to tau = beta- (just before tau = beta)
+!>
+!> For the boundary coupling in PRX A6:
+!>   - tau_z(i, 0)   -> Isigma at nt = 1
+!>   - tau_z(i, M-1) -> Isigma at nt = Ltrot
+!>
+!> The Hamiltonian_set_Z2_matter function returns ±1 values.
+!>
+!> @param[IN] I  Integer, site index
+!> @return tau_z value at tau=0 for site I (±1)
 !--------------------------------------------------------------------
         Integer Function Get_Tau_Z_At_Time_0(I)
 
@@ -1208,7 +1224,8 @@
           endif
           
           Allocate(Isigma(Latt%N))
-          Call Hamiltonian_set_Z2_matter(Isigma, 1)  ! tau = 1 (first slice)
+          ! tau = 0 corresponds to nt = 1 (first time slice, right after tau=0 boundary)
+          Call Hamiltonian_set_Z2_matter(Isigma, 1)
           Get_Tau_Z_At_Time_0 = Isigma(I)
           Deallocate(Isigma)
 
@@ -1220,7 +1237,18 @@
 !>
 !> @brief
 !> Computes tau_z at time slice M-1 (Ltrot) for site I.
-!> This is needed for the PRX A6 boundary coupling.
+!> This is needed for the PRX A6 boundary coupling:
+!>   W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
+!>
+!> @details
+!> In ALF's discretization:
+!>   - nt = Ltrot corresponds to tau = (Ltrot-1)*dtau = beta - dtau
+!>   - This is the "just before tau = beta" boundary value
+!>
+!> The Hamiltonian_set_Z2_matter function returns ±1 values.
+!>
+!> @param[IN] I  Integer, site index
+!> @return tau_z value at tau=M-1 for site I (±1)
 !--------------------------------------------------------------------
         Integer Function Get_Tau_Z_At_Time_M1(I)
 
@@ -2240,6 +2268,19 @@
                 
                 ! Update Green function via Sherman-Morrison
                 Call Lambda_Update_Green_site(i_site, G, R_ferm)
+                
+                ! ============================================================
+                ! CRITICAL: Synchronize B_lambda_slice with the new lambda!
+                ! ============================================================
+                ! When lambda_i flips, the corresponding rows of B_lambda_slice
+                ! must also flip sign: B'(i,:) -> -B'(i,:)
+                ! Otherwise the next lambda update will use inconsistent B_M.
+                If (N_spin_lambda == 1) then
+                   B_lambda_slice(i_site, :) = -B_lambda_slice(i_site, :)
+                Else
+                   B_lambda_slice(i_site, :) = -B_lambda_slice(i_site, :)
+                   B_lambda_slice(i_site + N_sites_lambda, :) = -B_lambda_slice(i_site + N_sites_lambda, :)
+                Endif
              Endif
           Enddo
           
@@ -2539,6 +2580,90 @@
           If (Abs(Ham_T) > Zero )  Deallocate ( Isigma, Isigmap1)
  
         end Subroutine Obser
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Diagnostic subroutine to measure and print Gauss constraint violation
+!> in real-time. Use this for debugging the strict Gauss implementation.
+!>
+!> @details
+!> This subroutine computes:
+!>   GaussViol = (1/N_tau/N_sites) * sum_{tau,r} (G_r(tau) - Q_r)^2
+!>
+!> For a correct implementation with strict Gauss constraint:
+!>   - GaussViol should be at machine precision (~ 1e-12 to 1e-10)
+!>   - If GaussViol is O(1e-2) or larger, there is likely a bug
+!>
+!> Also prints the lambda boundary coupling diagnostic:
+!>   Lambda_boundary_sum = sum_i tau_z(i,0) * lambda_i * tau_z(i,M-1)
+!>
+!> @param[IN] sweep_number  Integer, current MC sweep number (for logging)
+!--------------------------------------------------------------------
+        Subroutine Measure_GaussViolation_Diagnostic(sweep_number)
+          
+          Implicit none
+          Integer, Intent(IN) :: sweep_number
+          
+          Integer :: i_site, nt, G_r
+          Real (Kind=Kind(0.d0)) :: GaussViol, Gauss_sum
+          Real (Kind=Kind(0.d0)) :: Lambda_boundary_sum
+          Integer :: tau_z_0, tau_z_M1
+          Integer :: N_total
+          
+          If (.not. UseStrictGauss) return
+          
+          GaussViol = 0.d0
+          Gauss_sum = 0.d0
+          Lambda_boundary_sum = 0.d0
+          N_total = Ltrot * Latt%N
+          
+          ! Compute GaussViol and Gauss_sum over all sites and time slices
+          Do nt = 1, Ltrot
+             Do i_site = 1, Latt%N
+                G_r = Compute_Gauss_Operator_Int(i_site, nt)
+                Gauss_sum = Gauss_sum + real(G_r, kind(0.d0))
+                ! (G_r - 1)^2 because the physical constraint is G_r = +1
+                GaussViol = GaussViol + real((G_r - 1)**2, kind(0.d0))
+             Enddo
+          Enddo
+          
+          GaussViol = GaussViol / real(N_total, kind(0.d0))
+          Gauss_sum = Gauss_sum / real(N_total, kind(0.d0))
+          
+          ! Compute lambda boundary coupling sum
+          Do i_site = 1, Latt%N
+             tau_z_0  = Get_Tau_Z_At_Time_0(i_site)
+             tau_z_M1 = Get_Tau_Z_At_Time_M1(i_site)
+             Lambda_boundary_sum = Lambda_boundary_sum + &
+                real(tau_z_0 * lambda_field(i_site) * tau_z_M1, kind(0.d0))
+          Enddo
+          Lambda_boundary_sum = Lambda_boundary_sum / real(Latt%N, kind(0.d0))
+          
+          ! Print diagnostic info
+          Write(6,'(A)')        '============================================================'
+          Write(6,'(A,I8)')     ' GAUSS CONSTRAINT DIAGNOSTIC - Sweep ', sweep_number
+          Write(6,'(A)')        '============================================================'
+          Write(6,'(A,E15.8)')  '   <G_r>         (should be ~1): ', Gauss_sum
+          Write(6,'(A,E15.8)')  '   GaussViol     (should be ~0): ', GaussViol
+          Write(6,'(A,E15.8)')  '   Lambda_BC_sum (PRX A6 check): ', Lambda_boundary_sum
+          Write(6,'(A,F10.6)')  '   Gamma_Gauss:                  ', Gamma_Gauss
+          Write(6,'(A)')        '------------------------------------------------------------'
+          
+          ! Warning if GaussViol is too large
+          If (GaussViol > 1.d-6) then
+             Write(6,'(A)')     ' *** WARNING: GaussViol > 1e-6 ***'
+             Write(6,'(A)')     ' This indicates the strict Gauss constraint may not be working!'
+             Write(6,'(A)')     ' Check:'
+             Write(6,'(A)')     '   1. P[lambda] is correctly applied to B_M in wrapur'
+             Write(6,'(A)')     '   2. B_lambda_slice is updated when lambda flips'
+             Write(6,'(A)')     '   3. Gauss weight ratios are included in all updates'
+          Endif
+          Write(6,'(A)')        '============================================================'
+          
+        End Subroutine Measure_GaussViolation_Diagnostic
 
 !--------------------------------------------------------------------
 !> @author

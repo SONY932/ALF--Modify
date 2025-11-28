@@ -801,6 +801,116 @@ detM = det(Ginv)
 
 ---
 
+## 验证 Checklist
+
+### 🔍 数值诊断
+
+#### 1. Gauss 约束检查
+
+测量 $\langle (G_r - Q_r)^2 \rangle$，应该在机器精度附近：
+
+```fortran
+! 调用诊断函数（在 Hamiltonian_Z2_Matter_smod.F90 中）
+Call ham%GaussViol_Diagnostic(sweep_number)
+```
+
+- **正确实现**：GaussViol ~ $10^{-12}$ 到 $10^{-10}$
+- **有问题**：GaussViol > $10^{-6}$
+
+#### 2. λ 边界条件检查
+
+把所有 λ 固定为 +1，与"不加严格 Gauss projector"的结果比较：
+- 应该只在物理 sector 有差异，不应整体崩溃
+
+#### 3. Sign 检查
+
+在 sign-free 参数点（参考 PRX 论文）：
+- 如果平均 sign 掉得很快（L=4 时 <0.5），检查：
+  - P[λ] 是否多插了几次
+  - λ 翻转的 ferm ratio / SM 更新是否保持 det 符号一致
+
+### 🔧 实现要点
+
+#### 1. B_lambda_slice 同步
+
+**关键**：当 λ 翻转被接受时，必须同步更新 `B_lambda_slice` 的对应行：
+
+```fortran
+! 在 Sweep_Lambda 的接受分支中：
+If (accept) then
+    lambda_field(i_site) = -lambda_old
+    Call Lambda_Update_Green_site(i_site, G, R_ferm)
+    
+    ! CRITICAL: 同步更新 B_lambda_slice!
+    If (N_spin == 1) then
+       B_lambda_slice(i_site, :) = -B_lambda_slice(i_site, :)
+    Else
+       B_lambda_slice(i_site, :) = -B_lambda_slice(i_site, :)
+       B_lambda_slice(i_site + N_sites, :) = -B_lambda_slice(i_site + N_sites, :)
+    Endif
+Endif
+```
+
+#### 2. Sweep_Lambda 调用位置
+
+**关键**：只能在完整 CGR/WRAPUR 之后调用：
+
+```fortran
+do sweep = 1, N_sweeps
+    ! (1) 局部更新 τ、σ
+    call Sweep_tau(...)
+    call Sweep_sigma(...)
+
+    ! (2) 全局 wrap（CGR + WRAPUR）
+    call CGR(...)  ! 内部调用 WRAPUR，更新 B_lambda_slice
+
+    ! (3) λ-sweep 紧随 wrap 之后
+    if (ham%Use_Strict_Gauss()) then
+        call ham%Sweep_Lambda(GR)
+    end if
+
+    ! (4) 测量
+    call Measure(...)
+end do
+```
+
+#### 3. τ 索引约定
+
+ALF 离散化约定：
+- `nt = 1` → $\tau = 0^+$（边界开始）
+- `nt = Ltrot` → $\tau = \beta^-$（边界结束）
+
+PRX A6 边界耦合：
+- `tau_z(i, 0)` → `Hamiltonian_set_Z2_matter(Isigma, 1)`
+- `tau_z(i, M-1)` → `Hamiltonian_set_Z2_matter(Isigma, Ltrot)`
+
+### 📊 GaussViol 诊断输出示例
+
+```
+============================================================
+ GAUSS CONSTRAINT DIAGNOSTIC - Sweep      100
+============================================================
+   <G_r>         (should be ~1): 0.10000000E+01
+   GaussViol     (should be ~0): 0.12345678E-11
+   Lambda_BC_sum (PRX A6 check): 0.50000000E+00
+   Gamma_Gauss:                    1.234567
+------------------------------------------------------------
+============================================================
+```
+
+如果看到警告：
+```
+ *** WARNING: GaussViol > 1e-6 ***
+ This indicates the strict Gauss constraint may not be working!
+```
+
+检查：
+1. P[λ] 是否在 `wrapur_mod.F90` 的 `nt == Ltrot` 时正确应用
+2. B_lambda_slice 是否在 λ 翻转时同步更新
+3. 所有更新是否包含 Gauss 权重比率
+
+---
+
 ## 作者
 
 ALF Collaboration

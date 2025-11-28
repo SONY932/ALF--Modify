@@ -1008,8 +1008,18 @@ Program Main
                     endif
                 enddo
                 
-                ! Sweep over lambda fields for strict Gauss constraint (PRX 10.041057)
-                ! This must be done after wrap-up when GR and B_lambda_slice are synchronized
+                ! ================================================================
+                ! Sweep over lambda fields for strict Gauss constraint
+                ! (PRX 10.041057 Appendix A)
+                ! ================================================================
+                ! IMPORTANT: This MUST be done:
+                !   (1) AFTER full wrap-up (CGR/WRAPUR) when GR and B_lambda_slice
+                !       are synchronized with the current sigma/tau configuration
+                !   (2) BEFORE any further sigma/tau local updates (TAU_M)
+                ! The lambda sweep is site-only (tau-independent) and uses
+                ! Sherman-Morrison to update GR. B_lambda_slice is also updated
+                ! synchronously when a lambda flip is accepted.
+                ! ================================================================
                 If (ham%Use_Strict_Gauss()) then
                    Do nf_eff = 1, N_FL_eff
                       nf = Calc_Fl_map(nf_eff)

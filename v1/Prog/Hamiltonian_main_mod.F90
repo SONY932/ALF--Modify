@@ -166,6 +166,8 @@
         procedure, nopass :: Use_Strict_Gauss => Use_Strict_Gauss_base
         !> Sweep over all lambda fields (site-only update with Sherman-Morrison)
         procedure, nopass :: Sweep_Lambda => Sweep_Lambda_base
+        !> Diagnostic: measure and print Gauss constraint violation
+        procedure, nopass :: GaussViol_Diagnostic => GaussViol_Diagnostic_base
 #ifdef HDF5
         procedure, nopass :: write_parameters_hdf5 => write_parameters_hdf5_base
 #endif
@@ -898,6 +900,26 @@
            ! Override in Hamiltonian submodule for strict Gauss constraint
            
          end Subroutine Sweep_Lambda_base
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Diagnostic routine to measure and print Gauss constraint violation.
+!> Base implementation does nothing. Override in Hamiltonian submodule.
+!>
+!> @param[IN] sweep_number  Integer, current MC sweep number
+!-------------------------------------------------------------------
+         Subroutine GaussViol_Diagnostic_base(sweep_number)
+           Implicit none
+           
+           Integer, INTENT(IN) :: sweep_number
+           
+           ! Default implementation: do nothing
+           ! Override in Hamiltonian submodule for strict Gauss constraint
+           
+         end Subroutine GaussViol_Diagnostic_base
 
 #ifdef HDF5
          subroutine write_parameters_hdf5_base(filename)
