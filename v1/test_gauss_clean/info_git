@@ -1,0 +1,649 @@
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add/rm <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	deleted:    ALF.out
+ 	deleted:    Global_mod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_Plain_Vanilla_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Kondo_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_LRC_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Spin_Peierls_smod.o
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	deleted:    Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_tV_smod.o
+ 	deleted:    Hop_mod.o
+ 	deleted:    Langevin_HMC_mod.o
+ 	deleted:    Predefined_Hop_mod.o
+ 	deleted:    Predefined_Int_mod.o
+ 	deleted:    Predefined_Latt_mod.o
+ 	deleted:    Predefined_Obs_mod.o
+ 	deleted:    Predefined_Trial_mod.o
+ 	deleted:    Set_random_mod.o
+ 	deleted:    UDV_WRAP_mod.o
+ 	deleted:    Wrapgr_mod.o
+ 	deleted:    cgr1_mod.mod
+ 	deleted:    cgr1_mod.o
+ 	deleted:    cgr2_2_mod.mod
+ 	deleted:    cgr2_2_mod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	deleted:    global_mod.mod
+ 	deleted:    hamiltonian_main@ham_hubbard_plain_vanilla_smod.smod
+ 	deleted:    hamiltonian_main@ham_hubbard_smod.smod
+ 	deleted:    hamiltonian_main@ham_kondo_smod.smod
+ 	deleted:    hamiltonian_main@ham_lrc_smod.smod
+ 	deleted:    hamiltonian_main@ham_spin_peierls_smod.smod
+ 	deleted:    hamiltonian_main@ham_tv_smod.smod
+ 	deleted:    hamiltonian_main@ham_z2_matter_smod.smod
+ 	deleted:    hop_mod.mod
+ 	deleted:    langevin_hmc_mod.mod
+ 	modified:   main.F90
+ 	deleted:    main.o
+ 	deleted:    predefined_hoppings.mod
+ 	deleted:    predefined_int.mod
+ 	deleted:    predefined_lattices.mod
+ 	deleted:    predefined_obs.mod
+ 	deleted:    predefined_trial.mod
+ 	deleted:    set_random.mod
+ 	deleted:    tau_m_mod.mod
+ 	deleted:    tau_m_mod.o
+ 	deleted:    tau_p_mod.mod
+ 	deleted:    tau_p_mod.o
+ 	deleted:    udv_wrap_mod.mod
+ 	deleted:    upgrade_mod.mod
+ 	deleted:    upgrade_mod.o
+ 	deleted:    wrapgr_mod.mod
+ 	deleted:    wrapul_mod.mod
+ 	deleted:    wrapul_mod.o
+ 	deleted:    wrapur_mod.mod
+ 	deleted:    wrapur_mod.o
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add/rm <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	deleted:    ALF.out
+ 	deleted:    Global_mod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_Plain_Vanilla_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Kondo_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_LRC_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Spin_Peierls_smod.o
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	deleted:    Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_tV_smod.o
+ 	deleted:    Hop_mod.o
+ 	deleted:    Langevin_HMC_mod.o
+ 	deleted:    Predefined_Hop_mod.o
+ 	deleted:    Predefined_Int_mod.o
+ 	deleted:    Predefined_Latt_mod.o
+ 	deleted:    Predefined_Obs_mod.o
+ 	deleted:    Predefined_Trial_mod.o
+ 	deleted:    Set_random_mod.o
+ 	deleted:    UDV_WRAP_mod.o
+ 	deleted:    Wrapgr_mod.o
+ 	deleted:    cgr1_mod.mod
+ 	deleted:    cgr1_mod.o
+ 	deleted:    cgr2_2_mod.mod
+ 	deleted:    cgr2_2_mod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	deleted:    global_mod.mod
+ 	deleted:    hamiltonian_main@ham_hubbard_plain_vanilla_smod.smod
+ 	deleted:    hamiltonian_main@ham_hubbard_smod.smod
+ 	deleted:    hamiltonian_main@ham_kondo_smod.smod
+ 	deleted:    hamiltonian_main@ham_lrc_smod.smod
+ 	deleted:    hamiltonian_main@ham_spin_peierls_smod.smod
+ 	deleted:    hamiltonian_main@ham_tv_smod.smod
+ 	deleted:    hamiltonian_main@ham_z2_matter_smod.smod
+ 	deleted:    hop_mod.mod
+ 	deleted:    langevin_hmc_mod.mod
+ 	modified:   main.F90
+ 	deleted:    main.o
+ 	deleted:    predefined_hoppings.mod
+ 	deleted:    predefined_int.mod
+ 	deleted:    predefined_lattices.mod
+ 	deleted:    predefined_obs.mod
+ 	deleted:    predefined_trial.mod
+ 	deleted:    set_random.mod
+ 	deleted:    tau_m_mod.mod
+ 	deleted:    tau_m_mod.o
+ 	deleted:    tau_p_mod.mod
+ 	deleted:    tau_p_mod.o
+ 	deleted:    udv_wrap_mod.mod
+ 	deleted:    upgrade_mod.mod
+ 	deleted:    upgrade_mod.o
+ 	deleted:    wrapgr_mod.mod
+ 	deleted:    wrapul_mod.mod
+ 	deleted:    wrapul_mod.o
+ 	deleted:    wrapur_mod.mod
+ 	deleted:    wrapur_mod.o
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add/rm <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	deleted:    ALF.out
+ 	deleted:    Global_mod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_Plain_Vanilla_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Kondo_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_LRC_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Spin_Peierls_smod.o
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	deleted:    Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_tV_smod.o
+ 	deleted:    Hop_mod.o
+ 	deleted:    Langevin_HMC_mod.o
+ 	deleted:    Predefined_Hop_mod.o
+ 	deleted:    Predefined_Int_mod.o
+ 	deleted:    Predefined_Latt_mod.o
+ 	deleted:    Predefined_Obs_mod.o
+ 	deleted:    Predefined_Trial_mod.o
+ 	deleted:    Set_random_mod.o
+ 	deleted:    UDV_WRAP_mod.o
+ 	deleted:    Wrapgr_mod.o
+ 	deleted:    cgr1_mod.mod
+ 	deleted:    cgr1_mod.o
+ 	deleted:    cgr2_2_mod.mod
+ 	deleted:    cgr2_2_mod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	deleted:    global_mod.mod
+ 	deleted:    hamiltonian_main@ham_hubbard_plain_vanilla_smod.smod
+ 	deleted:    hamiltonian_main@ham_hubbard_smod.smod
+ 	deleted:    hamiltonian_main@ham_kondo_smod.smod
+ 	deleted:    hamiltonian_main@ham_lrc_smod.smod
+ 	deleted:    hamiltonian_main@ham_spin_peierls_smod.smod
+ 	deleted:    hamiltonian_main@ham_tv_smod.smod
+ 	deleted:    hamiltonian_main@ham_z2_matter_smod.smod
+ 	deleted:    hop_mod.mod
+ 	deleted:    langevin_hmc_mod.mod
+ 	modified:   main.F90
+ 	deleted:    main.o
+ 	deleted:    predefined_hoppings.mod
+ 	deleted:    predefined_int.mod
+ 	deleted:    predefined_lattices.mod
+ 	deleted:    predefined_obs.mod
+ 	deleted:    predefined_trial.mod
+ 	deleted:    set_random.mod
+ 	deleted:    tau_m_mod.mod
+ 	deleted:    tau_m_mod.o
+ 	deleted:    tau_p_mod.mod
+ 	deleted:    tau_p_mod.o
+ 	deleted:    udv_wrap_mod.mod
+ 	deleted:    upgrade_mod.mod
+ 	deleted:    upgrade_mod.o
+ 	deleted:    wrapgr_mod.mod
+ 	deleted:    wrapul_mod.mod
+ 	deleted:    wrapul_mod.o
+ 	deleted:    wrapur_mod.mod
+ 	deleted:    wrapur_mod.o
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add/rm <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	deleted:    ALF.out
+ 	deleted:    Global_mod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_Plain_Vanilla_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Kondo_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_LRC_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Spin_Peierls_smod.o
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	deleted:    Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_tV_smod.o
+ 	deleted:    Hop_mod.o
+ 	deleted:    Langevin_HMC_mod.o
+ 	deleted:    Predefined_Hop_mod.o
+ 	deleted:    Predefined_Int_mod.o
+ 	deleted:    Predefined_Latt_mod.o
+ 	deleted:    Predefined_Obs_mod.o
+ 	deleted:    Predefined_Trial_mod.o
+ 	deleted:    Set_random_mod.o
+ 	deleted:    UDV_WRAP_mod.o
+ 	deleted:    Wrapgr_mod.o
+ 	deleted:    cgr1_mod.mod
+ 	deleted:    cgr1_mod.o
+ 	deleted:    cgr2_2_mod.mod
+ 	deleted:    cgr2_2_mod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	deleted:    global_mod.mod
+ 	deleted:    hamiltonian_main@ham_hubbard_plain_vanilla_smod.smod
+ 	deleted:    hamiltonian_main@ham_hubbard_smod.smod
+ 	deleted:    hamiltonian_main@ham_kondo_smod.smod
+ 	deleted:    hamiltonian_main@ham_lrc_smod.smod
+ 	deleted:    hamiltonian_main@ham_spin_peierls_smod.smod
+ 	deleted:    hamiltonian_main@ham_tv_smod.smod
+ 	deleted:    hamiltonian_main@ham_z2_matter_smod.smod
+ 	deleted:    hop_mod.mod
+ 	deleted:    langevin_hmc_mod.mod
+ 	modified:   main.F90
+ 	deleted:    main.o
+ 	deleted:    predefined_hoppings.mod
+ 	deleted:    predefined_int.mod
+ 	deleted:    predefined_lattices.mod
+ 	deleted:    predefined_obs.mod
+ 	deleted:    predefined_trial.mod
+ 	deleted:    set_random.mod
+ 	deleted:    tau_m_mod.mod
+ 	deleted:    tau_m_mod.o
+ 	deleted:    tau_p_mod.mod
+ 	deleted:    tau_p_mod.o
+ 	deleted:    udv_wrap_mod.mod
+ 	deleted:    upgrade_mod.mod
+ 	deleted:    upgrade_mod.o
+ 	deleted:    wrapgr_mod.mod
+ 	deleted:    wrapul_mod.mod
+ 	deleted:    wrapul_mod.o
+ 	deleted:    wrapur_mod.mod
+ 	deleted:    wrapur_mod.o
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add/rm <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	deleted:    ALF.out
+ 	deleted:    Global_mod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_Plain_Vanilla_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Kondo_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_LRC_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Spin_Peierls_smod.o
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	deleted:    Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_tV_smod.o
+ 	deleted:    Hop_mod.o
+ 	deleted:    Langevin_HMC_mod.o
+ 	deleted:    Predefined_Hop_mod.o
+ 	deleted:    Predefined_Int_mod.o
+ 	deleted:    Predefined_Latt_mod.o
+ 	deleted:    Predefined_Obs_mod.o
+ 	deleted:    Predefined_Trial_mod.o
+ 	deleted:    Set_random_mod.o
+ 	deleted:    UDV_WRAP_mod.o
+ 	deleted:    Wrapgr_mod.o
+ 	deleted:    cgr1_mod.mod
+ 	deleted:    cgr1_mod.o
+ 	deleted:    cgr2_2_mod.mod
+ 	deleted:    cgr2_2_mod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	deleted:    global_mod.mod
+ 	deleted:    hamiltonian_main@ham_hubbard_plain_vanilla_smod.smod
+ 	deleted:    hamiltonian_main@ham_hubbard_smod.smod
+ 	deleted:    hamiltonian_main@ham_kondo_smod.smod
+ 	deleted:    hamiltonian_main@ham_lrc_smod.smod
+ 	deleted:    hamiltonian_main@ham_spin_peierls_smod.smod
+ 	deleted:    hamiltonian_main@ham_tv_smod.smod
+ 	deleted:    hamiltonian_main@ham_z2_matter_smod.smod
+ 	deleted:    hop_mod.mod
+ 	deleted:    langevin_hmc_mod.mod
+ 	modified:   main.F90
+ 	deleted:    main.o
+ 	deleted:    predefined_hoppings.mod
+ 	deleted:    predefined_int.mod
+ 	deleted:    predefined_lattices.mod
+ 	deleted:    predefined_obs.mod
+ 	deleted:    predefined_trial.mod
+ 	deleted:    set_random.mod
+ 	deleted:    tau_m_mod.mod
+ 	deleted:    tau_m_mod.o
+ 	deleted:    tau_p_mod.mod
+ 	deleted:    tau_p_mod.o
+ 	deleted:    udv_wrap_mod.mod
+ 	deleted:    upgrade_mod.mod
+ 	deleted:    upgrade_mod.o
+ 	deleted:    wrapgr_mod.mod
+ 	deleted:    wrapul_mod.mod
+ 	deleted:    wrapul_mod.o
+ 	deleted:    wrapur_mod.mod
+ 	deleted:    wrapur_mod.o
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add/rm <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	deleted:    ALF.out
+ 	deleted:    Global_mod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_Plain_Vanilla_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Kondo_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_LRC_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Spin_Peierls_smod.o
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	deleted:    Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_tV_smod.o
+ 	deleted:    Hop_mod.o
+ 	deleted:    Langevin_HMC_mod.o
+ 	deleted:    Predefined_Hop_mod.o
+ 	deleted:    Predefined_Int_mod.o
+ 	deleted:    Predefined_Latt_mod.o
+ 	deleted:    Predefined_Obs_mod.o
+ 	deleted:    Predefined_Trial_mod.o
+ 	deleted:    Set_random_mod.o
+ 	deleted:    UDV_WRAP_mod.o
+ 	deleted:    Wrapgr_mod.o
+ 	deleted:    cgr1_mod.mod
+ 	deleted:    cgr1_mod.o
+ 	deleted:    cgr2_2_mod.mod
+ 	deleted:    cgr2_2_mod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	deleted:    global_mod.mod
+ 	deleted:    hamiltonian_main@ham_hubbard_plain_vanilla_smod.smod
+ 	deleted:    hamiltonian_main@ham_hubbard_smod.smod
+ 	deleted:    hamiltonian_main@ham_kondo_smod.smod
+ 	deleted:    hamiltonian_main@ham_lrc_smod.smod
+ 	deleted:    hamiltonian_main@ham_spin_peierls_smod.smod
+ 	deleted:    hamiltonian_main@ham_tv_smod.smod
+ 	deleted:    hamiltonian_main@ham_z2_matter_smod.smod
+ 	deleted:    hop_mod.mod
+ 	deleted:    langevin_hmc_mod.mod
+ 	modified:   main.F90
+ 	deleted:    main.o
+ 	deleted:    predefined_hoppings.mod
+ 	deleted:    predefined_int.mod
+ 	deleted:    predefined_lattices.mod
+ 	deleted:    predefined_obs.mod
+ 	deleted:    predefined_trial.mod
+ 	deleted:    set_random.mod
+ 	deleted:    tau_m_mod.mod
+ 	deleted:    tau_m_mod.o
+ 	deleted:    tau_p_mod.mod
+ 	deleted:    tau_p_mod.o
+ 	deleted:    udv_wrap_mod.mod
+ 	deleted:    upgrade_mod.mod
+ 	deleted:    upgrade_mod.o
+ 	deleted:    wrapgr_mod.mod
+ 	deleted:    wrapul_mod.mod
+ 	deleted:    wrapul_mod.o
+ 	deleted:    wrapur_mod.mod
+ 	deleted:    wrapur_mod.o
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add/rm <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	deleted:    ALF.out
+ 	deleted:    Global_mod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_Plain_Vanilla_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Kondo_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_LRC_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Spin_Peierls_smod.o
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	deleted:    Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_tV_smod.o
+ 	deleted:    Hop_mod.o
+ 	deleted:    Langevin_HMC_mod.o
+ 	deleted:    Predefined_Hop_mod.o
+ 	deleted:    Predefined_Int_mod.o
+ 	deleted:    Predefined_Latt_mod.o
+ 	deleted:    Predefined_Obs_mod.o
+ 	deleted:    Predefined_Trial_mod.o
+ 	deleted:    Set_random_mod.o
+ 	deleted:    UDV_WRAP_mod.o
+ 	deleted:    Wrapgr_mod.o
+ 	deleted:    cgr1_mod.mod
+ 	deleted:    cgr1_mod.o
+ 	deleted:    cgr2_2_mod.mod
+ 	deleted:    cgr2_2_mod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	deleted:    global_mod.mod
+ 	deleted:    hamiltonian_main@ham_hubbard_plain_vanilla_smod.smod
+ 	deleted:    hamiltonian_main@ham_hubbard_smod.smod
+ 	deleted:    hamiltonian_main@ham_kondo_smod.smod
+ 	deleted:    hamiltonian_main@ham_lrc_smod.smod
+ 	deleted:    hamiltonian_main@ham_spin_peierls_smod.smod
+ 	deleted:    hamiltonian_main@ham_tv_smod.smod
+ 	deleted:    hamiltonian_main@ham_z2_matter_smod.smod
+ 	deleted:    hop_mod.mod
+ 	deleted:    langevin_hmc_mod.mod
+ 	modified:   main.F90
+ 	deleted:    main.o
+ 	deleted:    predefined_hoppings.mod
+ 	deleted:    predefined_int.mod
+ 	deleted:    predefined_lattices.mod
+ 	deleted:    predefined_obs.mod
+ 	deleted:    predefined_trial.mod
+ 	deleted:    set_random.mod
+ 	deleted:    tau_m_mod.mod
+ 	deleted:    tau_m_mod.o
+ 	deleted:    tau_p_mod.mod
+ 	deleted:    tau_p_mod.o
+ 	deleted:    udv_wrap_mod.mod
+ 	deleted:    upgrade_mod.mod
+ 	deleted:    upgrade_mod.o
+ 	deleted:    wrapgr_mod.mod
+ 	deleted:    wrapul_mod.mod
+ 	deleted:    wrapul_mod.o
+ 	deleted:    wrapur_mod.mod
+ 	deleted:    wrapur_mod.o
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add/rm <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	deleted:    ALF.out
+ 	deleted:    Global_mod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_Plain_Vanilla_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Kondo_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_LRC_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Spin_Peierls_smod.o
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	deleted:    Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_tV_smod.o
+ 	deleted:    Hop_mod.o
+ 	deleted:    Langevin_HMC_mod.o
+ 	deleted:    Predefined_Hop_mod.o
+ 	deleted:    Predefined_Int_mod.o
+ 	deleted:    Predefined_Latt_mod.o
+ 	deleted:    Predefined_Obs_mod.o
+ 	deleted:    Predefined_Trial_mod.o
+ 	deleted:    Set_random_mod.o
+ 	deleted:    UDV_WRAP_mod.o
+ 	deleted:    Wrapgr_mod.o
+ 	deleted:    cgr1_mod.mod
+ 	deleted:    cgr1_mod.o
+ 	deleted:    cgr2_2_mod.mod
+ 	deleted:    cgr2_2_mod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	deleted:    global_mod.mod
+ 	deleted:    hamiltonian_main@ham_hubbard_plain_vanilla_smod.smod
+ 	deleted:    hamiltonian_main@ham_hubbard_smod.smod
+ 	deleted:    hamiltonian_main@ham_kondo_smod.smod
+ 	deleted:    hamiltonian_main@ham_lrc_smod.smod
+ 	deleted:    hamiltonian_main@ham_spin_peierls_smod.smod
+ 	deleted:    hamiltonian_main@ham_tv_smod.smod
+ 	deleted:    hamiltonian_main@ham_z2_matter_smod.smod
+ 	deleted:    hop_mod.mod
+ 	deleted:    langevin_hmc_mod.mod
+ 	modified:   main.F90
+ 	deleted:    main.o
+ 	deleted:    predefined_hoppings.mod
+ 	deleted:    predefined_int.mod
+ 	deleted:    predefined_lattices.mod
+ 	deleted:    predefined_obs.mod
+ 	deleted:    predefined_trial.mod
+ 	deleted:    set_random.mod
+ 	deleted:    tau_m_mod.mod
+ 	deleted:    tau_m_mod.o
+ 	deleted:    tau_p_mod.mod
+ 	deleted:    tau_p_mod.o
+ 	deleted:    udv_wrap_mod.mod
+ 	deleted:    upgrade_mod.mod
+ 	deleted:    upgrade_mod.o
+ 	deleted:    wrapgr_mod.mod
+ 	deleted:    wrapul_mod.mod
+ 	deleted:    wrapul_mod.o
+ 	deleted:    wrapur_mod.mod
+ 	deleted:    wrapur_mod.o
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add/rm <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	deleted:    ALF.out
+ 	deleted:    Global_mod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_Plain_Vanilla_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Hubbard_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Kondo_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_LRC_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_Spin_Peierls_smod.o
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	deleted:    Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	deleted:    Hamiltonians/Hamiltonian_tV_smod.o
+ 	deleted:    Hop_mod.o
+ 	deleted:    Langevin_HMC_mod.o
+ 	deleted:    Predefined_Hop_mod.o
+ 	deleted:    Predefined_Int_mod.o
+ 	deleted:    Predefined_Latt_mod.o
+ 	deleted:    Predefined_Obs_mod.o
+ 	deleted:    Predefined_Trial_mod.o
+ 	deleted:    Set_random_mod.o
+ 	deleted:    UDV_WRAP_mod.o
+ 	deleted:    Wrapgr_mod.o
+ 	deleted:    cgr1_mod.mod
+ 	deleted:    cgr1_mod.o
+ 	deleted:    cgr2_2_mod.mod
+ 	deleted:    cgr2_2_mod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	deleted:    global_mod.mod
+ 	deleted:    hamiltonian_main@ham_hubbard_plain_vanilla_smod.smod
+ 	deleted:    hamiltonian_main@ham_hubbard_smod.smod
+ 	deleted:    hamiltonian_main@ham_kondo_smod.smod
+ 	deleted:    hamiltonian_main@ham_lrc_smod.smod
+ 	deleted:    hamiltonian_main@ham_spin_peierls_smod.smod
+ 	deleted:    hamiltonian_main@ham_tv_smod.smod
+ 	deleted:    hamiltonian_main@ham_z2_matter_smod.smod
+ 	deleted:    hop_mod.mod
+ 	deleted:    langevin_hmc_mod.mod
+ 	modified:   main.F90
+ 	deleted:    main.o
+ 	deleted:    predefined_hoppings.mod
+ 	deleted:    predefined_int.mod
+ 	deleted:    predefined_lattices.mod
+ 	deleted:    predefined_obs.mod
+ 	deleted:    predefined_trial.mod
+ 	deleted:    set_random.mod
+ 	deleted:    tau_m_mod.mod
+ 	deleted:    tau_m_mod.o
+ 	deleted:    tau_p_mod.mod
+ 	deleted:    tau_p_mod.o
+ 	deleted:    udv_wrap_mod.mod
+ 	deleted:    upgrade_mod.mod
+ 	deleted:    upgrade_mod.o
+ 	deleted:    wrapgr_mod.mod
+ 	deleted:    wrapul_mod.mod
+ 	deleted:    wrapul_mod.o
+ 	deleted:    wrapur_mod.mod
+ 	deleted:    wrapur_mod.o
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	modified:   ALF.out
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	modified:   hamiltonian_main@ham_z2_matter_smod.smod
+ 	modified:   main.F90
+ 	modified:   main.o
+ 
+ Untracked files:
+   (use "git add <file>..." to include in what will be committed)
+ 	../test_gauss_clean/
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================
+ ==================================
+ On branch cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441
+ Your branch is up to date with 'origin/cursor/align-gauss-constraint-implementation-with-paper-claude-4.5-opus-high-thinking-4441'.
+ 
+ Changes not staged for commit:
+   (use "git add <file>..." to update what will be committed)
+   (use "git restore <file>..." to discard changes in working directory)
+ 	modified:   ../Documentation/Z2_Strict_Gauss_Constraint.md
+ 	modified:   ALF.out
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.F90
+ 	modified:   Hamiltonians/Hamiltonian_Z2_Matter_smod.o
+ 	modified:   git.h
+ 	modified:   git_status.h
+ 	modified:   hamiltonian_main@ham_z2_matter_smod.smod
+ 	modified:   main.F90
+ 	modified:   main.o
+ 
+ Untracked files:
+   (use "git add <file>..." to include in what will be committed)
+ 	../test_gauss_clean/
+ 
+ no changes added to commit (use "git add" and/or "git commit -a")
+ ==================================

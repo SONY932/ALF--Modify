@@ -1110,14 +1110,16 @@
           Implicit none
           
           Integer :: I, Ix, Iy
-          Real (Kind=Kind(0.d0)) :: epsilon_h, Gamma_max
+          Real (Kind=Kind(0.d0)) :: epsilon_h, Gamma_max, rand_val
           
           ! ============================================================
           ! CRITICAL: lambda is TAU-INDEPENDENT per PRX Appendix A!
           ! ============================================================
           ! Allocate lambda field array: lambda_field(site) only!
           Allocate(lambda_field(Latt%N))
-          lambda_field = 1  ! Initialize all lambda to +1
+          ! Initialize all lambda to +1
+          ! This makes P[λ] = I initially, so G = (1+B)^{-1}
+          lambda_field = +1
           
           ! Allocate background charge array Q_r
           Allocate(Q_background(Latt%N))
@@ -1647,6 +1649,14 @@
 !> @param[IN] nt Integer, time slice
 !> @param[IN] GRC Complex(:,:,:), density matrix <c^dag c> (not used in PRX formulation)
 !> @return Gauss operator expectation value
+!>
+!> @details
+!> PRX orthogonal-fermion / slave-spin construction:
+!>   G_r = Q_r * τ_r^x * Π_{b∈+r} σ_b^x
+!>
+!> IMPORTANT: (-1)^{n_f} is ABSORBED into τ in this construction!
+!> The Gauss operator is purely bosonic (Z₂ fields only).
+!> This is what makes the model sign-free.
 !--------------------------------------------------------------------
         Complex (Kind=Kind(0.d0)) Function Compute_Gauss_Operator(I, nt, GRC)
 
@@ -1658,7 +1668,6 @@
           ! Local
           Integer :: X_r, tau_r_x, Q_r, nt1
           Integer, allocatable :: Isigma(:), Isigmap1(:)
-          Complex (Kind=Kind(0.d0)) :: fermion_parity
           
           If (.not. UseStrictGauss) then
              Compute_Gauss_Operator = cmplx(1.d0, 0.d0, kind(0.d0))
@@ -1686,14 +1695,9 @@
              tau_r_x = 1
           endif
           
-          ! CRITICAL: Include fermion parity (-1)^{n_f} in the Gauss operator!
-          ! In DQMC, (-1)^n = 1 - 2*<n> = 1 - 2*GRC(I,I)
-          ! For SU(N) fermions, we need (1 - 2*GRC)^N_SUN
-          fermion_parity = cmplx(1.d0, 0.d0, kind(0.d0)) - cmplx(2.d0, 0.d0, kind(0.d0)) * GRC(I, I, 1)
-          fermion_parity = fermion_parity ** N_SUN
-          
-          ! G_r = Q_r * (-1)^{n_f} * tau_r^x * X_r
-          Compute_Gauss_Operator = fermion_parity * cmplx(real(Q_r * tau_r_x * X_r, kind(0.d0)), 0.d0, kind(0.d0))
+          ! G_r = Q_r * τ_r^x * X_r
+          ! NOTE: No (-1)^{n_f} here! It's absorbed into τ in PRX construction.
+          Compute_Gauss_Operator = cmplx(real(Q_r * tau_r_x * X_r, kind(0.d0)), 0.d0, kind(0.d0))
 
         End Function Compute_Gauss_Operator
 
@@ -2147,22 +2151,25 @@
         Subroutine Lambda_Ferm_Ratio_site(i_site, G, R_ferm)
           !
           ! ============================================================
-          ! SIMPLIFIED FORMULA for SU(N) symmetric systems:
-          !   R_ferm = (2*G_{ii} - 1)^N_SUN
+          ! CORRECT FORMULA including lambda_old factor!
           ! ============================================================
-          ! Key insight: Since B*G = 1 - G (because G = (1+B)^{-1}),
-          ! we have:
-          !   (B*G)_{ii} = 1 - G_{ii}
+          ! From G = (1 + P_old * B)^{-1}, we have:
+          !   G + G * P_old * B = I
+          ! So:
+          !   P_old * B * G = I - G  (since P_old^{-1} = P_old for ±1 diagonal)
+          !   B * G = P_old * (I - G)
+          !   (B * G)_{ii} = lambda_old * (1 - G_{ii})
           !
-          ! Therefore:
-          !   R_single = 1 - 2*(B*G)_{ii} = 1 - 2*(1 - G_{ii}) = 2*G_{ii} - 1
+          ! Using matrix determinant lemma:
+          !   R_ferm = 1 - 2 * (B * G)_{ii} = 1 - 2 * lambda_old * (1 - G_{ii})
           !
-          ! For SU(N) symmetric systems, the Green function stored in ALF
-          ! is for a single spin/color. The total determinant ratio is:
-          !   R_ferm = R_single^N_SUN
+          ! For SU(N) symmetric systems:
+          !   R_ferm_total = R_single^N_SUN
           !
-          ! NOTE: In ALF with N_SUN > 1, G has dimension Ndim x Ndim where
-          ! Ndim = Latt%N (number of sites), NOT 2*Latt%N!
+          ! CRITICAL: The lambda_old factor is essential! Without it:
+          !   - When lambda_old = +1 and G_{ii} = 0.5: R = 0 (correct)
+          !   - When lambda_old = -1 and G_{ii} = 0.5: R = 2 (correct!)
+          ! The OLD formula R = 2*G_{ii} - 1 missed the lambda_old factor!
           ! ============================================================
           
           Implicit none
@@ -2173,14 +2180,20 @@
           
           ! Local
           Complex (Kind=Kind(0.d0)) :: R_single
+          Integer :: lambda_old
           
           If (.not. UseStrictGauss) then
              R_ferm = cmplx(1.d0, 0.d0, kind(0.d0))
              return
           Endif
           
-          ! R_single = 2 * G(i,i) - 1 for one spin/color
-          R_single = 2.d0 * G(i_site, i_site) - cmplx(1.d0, 0.d0, kind(0.d0))
+          lambda_old = lambda_field(i_site)
+          
+          ! CORRECT formula with lambda_old factor:
+          ! R_single = 1 - 2 * lambda_old * (1 - G_{ii})
+          R_single = cmplx(1.d0, 0.d0, kind(0.d0)) - &
+               cmplx(2.d0 * real(lambda_old, kind(0.d0)), 0.d0, kind(0.d0)) * &
+               (cmplx(1.d0, 0.d0, kind(0.d0)) - G(i_site, i_site))
           
           ! For SU(N) symmetry, total ratio is R^{N_SUN}
           R_ferm = R_single ** N_SUN
@@ -2205,21 +2218,27 @@
         Subroutine Lambda_Update_Green_site(i_site, G, R_ferm)
           !
           ! ============================================================
-          ! SIMPLIFIED FORMULA using only G (no B_lambda_slice needed!)
+          ! Sherman-Morrison update with CORRECT lambda_old factor!
           ! ============================================================
           ! For SU(N) symmetric systems in ALF:
           ! - G has dimension Ndim x Ndim = Latt%N x Latt%N
           ! - All N_SUN colors share the same Green function
           ! - Only ONE rank-1 update is needed
           !
-          ! Since B*G = 1 - G, the Sherman-Morrison update simplifies to:
+          ! From the derivation in Lambda_Ferm_Ratio_site:
+          !   R_single = 1 - 2 * lambda_old * (1 - G_{ii})
           !
-          ! G'_{jk} = G_{jk} - 2 * G_{ji} * (δ_{ik} - G_{ik}) / R_single
+          ! The SM update formula is:
+          !   G_new = G - (G u) (v^T G) / R_single
+          ! where u = e_i, v = -2*lambda_old * B^T e_i
           !
-          ! where R_single = 2*G_{ii} - 1 (for one color)
+          ! Since B G = P_old (I - G), we have:
+          !   v^T G = -2*lambda_old * e_i^T B G = -2*lambda_old * (BG)_{i,:}
+          !         = -2*lambda_old * lambda_old * (1 - G)_{i,:}
+          !         = -2 * (1 - G)_{i,:}  (since lambda_old^2 = 1)
           !
-          ! Or more compactly:
-          !   G' = G + 2 * G[:,i] ⊗ (e_i - G[i,:]) / R_single
+          ! So the update simplifies to:
+          !   G_new = G + 2 * G[:,i] ⊗ (e_i - G[i,:]) / R_single
           ! ============================================================
           
           Implicit none
@@ -2229,7 +2248,7 @@
           Complex (Kind=Kind(0.d0)), INTENT(IN) :: R_ferm
           
           ! Local
-          Integer :: N, I, J
+          Integer :: N, I, J, lambda_old
           Complex (Kind=Kind(0.d0)) :: R_single, G_ii, coeff
           Complex (Kind=Kind(0.d0)), allocatable :: G_col(:), delta_row(:)
           
@@ -2239,16 +2258,21 @@
           
           Allocate(G_col(N), delta_row(N))
           
-          ! For SU(N) symmetric systems, G is Ndim x Ndim (does not include spin index)
-          ! Only one rank-1 update is needed
+          ! Get current lambda value (BEFORE the flip - the flip already happened!)
+          ! We need the OLD value, so we flip the sign back
+          lambda_old = -lambda_field(i_site)  ! Current value is NEW, so negate to get OLD
+          
           G_ii = G(i_site, i_site)
-          R_single = 2.d0 * G_ii - cmplx(1.d0, 0.d0, kind(0.d0))
+          
+          ! CORRECT R_single with lambda_old:
+          R_single = cmplx(1.d0, 0.d0, kind(0.d0)) - &
+               cmplx(2.d0 * real(lambda_old, kind(0.d0)), 0.d0, kind(0.d0)) * &
+               (cmplx(1.d0, 0.d0, kind(0.d0)) - G_ii)
           
           ! G_col = G(:, i_site)
           G_col(:) = G(:, i_site)
           
           ! delta_row = e_i - G(i_site, :)
-          ! delta_row(k) = δ_{i,k} - G(i_site, k)
           Do J = 1, N
              delta_row(J) = -G(i_site, J)
           Enddo
@@ -2292,11 +2316,16 @@
           Complex (Kind=Kind(0.d0)), INTENT(INOUT), optional :: Phase
           
           ! Local
-          Integer :: i_site, lambda_old
+          Integer :: i_site, lambda_old, I
           Real (Kind=Kind(0.d0)) :: R_bose, Weight, rand_val
-          Complex (Kind=Kind(0.d0)) :: R_ferm, R_tot, Phase_ratio
+          Complex (Kind=Kind(0.d0)) :: R_ferm, R_tot, Phase_ratio, R_single
+          Integer :: n_accept
+          Integer, save :: sweep_count = 0
           
           If (.not. UseStrictGauss) return
+          
+          sweep_count = sweep_count + 1
+          n_accept = 0
           
           ! Sweep over all sites (NOT time slices!)
           Do i_site = 1, N_sites_lambda
@@ -2319,6 +2348,7 @@
              If (rand_val < Weight) then
                 ! Accept the flip
                 lambda_field(i_site) = -lambda_old
+                n_accept = n_accept + 1
                 
                 ! Accumulate phase/sign: Phase = Phase * R_tot / |R_tot|
                 If (present(Phase) .and. Weight > 0.d0) then
@@ -2326,13 +2356,26 @@
                    Phase = Phase * Phase_ratio
                 Endif
                 
-                ! NOTE: Sherman-Morrison update is disabled.
-                ! The Green function will be recalculated by CGR after this sweep.
-                ! This is less efficient but ensures numerical stability.
-                ! A more efficient implementation would properly implement:
+                ! Sherman-Morrison update of Green function
+                ! TEMPORARILY DISABLED due to numerical instability
+                ! TODO: Debug the SM formula
                 ! Call Lambda_Update_Green_site(i_site, G, R_ferm)
              Endif
           Enddo
+          
+          ! Diagnostic output (first few sweeps only)
+          If (sweep_count <= 3) then
+             Write(6,'(A,I4,A,I2,A,I2)') ' Sweep_Lambda #', sweep_count, &
+                  ': accepted ', n_accept, ' of ', N_sites_lambda
+             Write(6,'(A,E12.4,A,I2)') '   Sample G(1,1) = ', real(G(1,1)), &
+                  ', lambda(1) = ', lambda_field(1)
+             ! More detailed diagnostics
+             Write(6,'(A,4I3)') '   Lambda values: ', (lambda_field(I), I=1,min(4,N_sites_lambda))
+             ! Show R_bose and R_ferm for site 1
+             R_bose = Compute_Gauss_Weight_Ratio_Lambda_PRX(1)
+             Call Lambda_Ferm_Ratio_site(1, G, R_ferm)
+             Write(6,'(A,E12.4,A,E12.4)') '   Site 1: R_bose=', R_bose, ', |R_ferm|=', abs(R_ferm)
+          Endif
           
         End Subroutine Sweep_Lambda
 
@@ -2883,24 +2926,21 @@
         endif
         
         ! ============================================================
-        ! Initialize lambda field for strict Gauss constraint (PRX A6)
+        ! Sync nsigma with lambda_field for strict Gauss constraint (PRX A6)
         ! CRITICAL: lambda is TAU-INDEPENDENT per PRX Appendix A!
         ! ============================================================
-        ! We still use Field_type = 5 in nsigma for ALF compatibility,
-        ! but lambda_field(site) is the authoritative source.
-        ! All time slices share the same lambda value for each site.
+        ! lambda_field(site) was already initialized in Setup_Gauss_constraint.
+        ! Here we only sync nsigma for ALF compatibility (don't overwrite lambda_field!)
         If (UseStrictGauss) then
            Do I = 1, Latt%N
-              ! Initialize lambda to +1 (TAU-INDEPENDENT)
-              lambda_field(I) = 1
-              
-              ! For ALF compatibility, set nsigma for all tau to same value
+              ! Sync nsigma with lambda_field (all tau share same lambda)
               nc = Field_list(I, 3, 5)
               Do nt = 1, Ltrot
                  Initial_field(nc, nt) = cmplx(real(lambda_field(I), kind(0.d0)), 0.d0, Kind(0.d0))
               Enddo
            Enddo
-           Write(6,*) 'Lambda field initialized (TAU-INDEPENDENT per PRX A6)'
+           Write(6,'(A,4I3)') ' Lambda field initial values: ', &
+                (lambda_field(I), I=1,min(4,Latt%N))
         endif
 
         deallocate (Isigma, Isigma1)
