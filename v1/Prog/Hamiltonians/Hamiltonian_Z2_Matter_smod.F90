@@ -111,20 +111,20 @@
       Real (Kind=Kind(0.d0)) :: DW_Matter_tau(-1:1), DW_Ising_Matter(-1:1)
       Integer, allocatable   :: Field_list(:,:,:), Field_list_inv(:,:)
 
-      !>    Storage for strict Gauss constraint (lambda field)
-      !>    lambda_field(r, tau) = +1 or -1, the Z2 Lagrange multiplier field
-      !>    Used for exact projection: P_r = (1/2)(1 + G_r) via sum over lambda
-      Integer, allocatable   :: lambda_field(:,:)
+      !>    Storage for strict Gauss constraint (PRX 10.041057 Appendix A)
+      !>    ============================================================
+      !>    CRITICAL: lambda is TAU-INDEPENDENT! Only spatial index!
+      !>    lambda_field(r) = +1 or -1, the Z2 Lagrange multiplier
+      !>    This is the key insight from PRX Appendix A (A5-A6)
+      Integer, allocatable   :: lambda_field(:)  ! lambda_field(site), NOT (site,tau)!
       !>    Background charge Q_r for Gauss sector selection
       !>    Q_r = +1 for even sector, Q_r = -1 for odd sector
-      !>    G_r = Q_r * (-1)^n_r * tau_r^x * prod sigma_b^x
+      !>    G_r = Q_r * tau_r^x * prod sigma_b^x (NO (-1)^n_f in path integral!)
       Integer, allocatable   :: Q_background(:)
-      !>    Storage for Gauss operator related quantities
-      !>    star_product(r, tau) = product of sigma^x on links adjacent to site r
-      Integer, allocatable   :: star_product_cache(:,:)
-      !>    Gauss weight storage: W_r(lambda, G_r) = (1/4)(1+lambda)(1+lambda*G_r)
-      !>    This implements the exact projection onto physical Hilbert space
-      Real (Kind=Kind(0.d0)) :: DW_Gauss_weight(-1:1, -1:1)  ! (lambda, G_r)
+      !>    Gamma parameter for Gauss projection (PRX A6)
+      !>    gamma = -0.5 * ln(tanh(epsilon * h))
+      !>    W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
+      Real (Kind=Kind(0.d0)) :: Gamma_Gauss
 
     contains
       
@@ -654,32 +654,26 @@
           
           ! ================================================================
           ! GAUSS CONSTRAINT: lambda field flip (Field_type = 5)
-          ! ================================================================
-          ! For lambda flip: lambda -> -lambda at site I, time nt
-          ! Weight ratio = W(lambda_new, G_r) / W(lambda_old, G_r)
-          ! 
-          ! Key insight from paper: W_r = (1/4)(1+lambda)(1+lambda*G_r)
-          ! - If G_r = +1 and lambda_old = +1: W_old = 1, W_new = 0 -> ratio = 0 (reject)
-          ! - If G_r = -1: W = 0 regardless of lambda (config already invalid)
-          ! - If G_r = +1 and lambda_old = -1: W_old = 0 (shouldn't happen in valid sim)
+          ! Following PRX 10.041057 Appendix A (A6):
+          !   W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
           !
-          ! The fermion part is handled separately through the determinant ratio
-          ! involving the diagonal matrix P[lambda] with P_ii = lambda_i
+          ! When lambda_i -> -lambda_i:
+          !   R_bose = exp(2 * gamma * tau_z(i,0) * tau_z(i,M-1) * lambda_old)
+          !
+          ! CRITICAL: lambda is TAU-INDEPENDENT!
+          ! We flip lambda_field(I), not lambda at specific tau.
+          ! ================================================================
           If (UseStrictGauss .and. Field_list_inv(n,3) == 5) then
              I = Field_list_inv(n,1)  ! Site index
              
-             ! Current lambda value (before flip)
-             lambda_old = nsigma%i(n, nt)
-             lambda_new = -lambda_old  ! After flip
-             
-             ! Compute G_r (this doesn't change when lambda flips)
-             G_r_old = Compute_Gauss_Operator_Int(I, nt)
-             G_r_new = G_r_old  ! G_r doesn't change when lambda flips
-             
-             ! Compute Gauss weight ratio
-             R_Gauss = Compute_Gauss_Weight_Ratio(lambda_old, lambda_new, G_r_old, G_r_new)
+             ! Compute PRX A6 weight ratio for lambda flip
+             R_Gauss = Compute_Gauss_Weight_Ratio_Lambda_PRX(I)
              
              S0 = R_Gauss
+             
+             ! Note: The fermion part is handled separately through
+             ! det(1 + P[lambda_new] * B_total) / det(1 + P[lambda_old] * B_total)
+             ! This is NOT the per-tau P(tau) approach!
           endif
 
         end function S0
@@ -1094,32 +1088,27 @@
 !> ALF Collaboration
 !>
 !> @brief
-!> This routine initializes the storage for strict Gauss constraint projection.
-!> 
-!> Following PRX 10, 041057 (Appendix A), the Gauss operator is:
-!>   G_r = Q_r * (-1)^{n_r} * tau_r^x * prod_{b in +r} sigma^x_b
-!> where Q_r is the background charge (sector selection).
+!> Initializes strict Gauss constraint following PRX 10.041057 Appendix A.
 !>
-!> The projection P_r = (1/2)(1 + G_r) is implemented via Z2 auxiliary field lambda_r(tau).
-!> The exact lambda-expansion gives:
-!>   P_r = (1/4) * sum_{lambda=+/-1} (1 + lambda) * (1 + lambda * G_r)
-!>
-!> This means the local weight is:
-!>   W_r(lambda, G_r) = (1/4) * (1 + lambda) * (1 + lambda * G_r)
-!>
-!> Key properties:
-!>   - If G_r = +1: W_r(+1, +1) = 1, W_r(-1, +1) = 0  -> only lambda=+1 contributes
-!>   - If G_r = -1: W_r(+1, -1) = 0, W_r(-1, -1) = 0  -> STRICTLY EXCLUDED
+!> KEY POINTS FROM PRX APPENDIX A:
+!> 1. lambda_i is TAU-INDEPENDENT (only spatial index)
+!> 2. Gauss operator: G_r = Q_r * tau_r^x * prod sigma_b^x (NO (-1)^n_f!)
+!> 3. Weight: W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))  [A6]
+!> 4. gamma = -0.5 * ln(tanh(epsilon * h))
+!> 5. Fermion det modified: det(1 + P[lambda] * B_total), NOT per-tau P(tau)
 !--------------------------------------------------------------------
         Subroutine Setup_Gauss_constraint
 
           Implicit none
           
-          Integer :: I, nt, Ix, Iy
+          Integer :: I, Ix, Iy
+          Real (Kind=Kind(0.d0)) :: epsilon_h
           
-          ! Allocate lambda field array: lambda_field(site, tau)
-          ! Lambda takes values +1 or -1
-          Allocate(lambda_field(Latt%N, Ltrot))
+          ! ============================================================
+          ! CRITICAL: lambda is TAU-INDEPENDENT per PRX Appendix A!
+          ! ============================================================
+          ! Allocate lambda field array: lambda_field(site) only!
+          Allocate(lambda_field(Latt%N))
           lambda_field = 1  ! Initialize all lambda to +1
           
           ! Allocate background charge array Q_r
@@ -1128,15 +1117,12 @@
           ! Initialize Q_background based on GaussSector
           select case (trim(str_to_upper(GaussSector)))
           case ('EVEN')
-             ! All sites have Q_r = +1
              Q_background = 1
              Write(6,*) 'Gauss sector: EVEN (Q_r = +1 for all sites)'
           case ('ODD')
-             ! All sites have Q_r = -1
              Q_background = -1
              Write(6,*) 'Gauss sector: ODD (Q_r = -1 for all sites)'
           case ('STAGGERED')
-             ! Staggered pattern: sublattice A has Q_r = +1, sublattice B has Q_r = -1
              Do I = 1, Latt%N
                 Ix = Latt%list(I, 1)
                 Iy = Latt%list(I, 2)
@@ -1148,35 +1134,195 @@
              Enddo
              Write(6,*) 'Gauss sector: STAGGERED (checkerboard pattern)'
           case default
-             ! Default to even sector
              Q_background = 1
              Write(6,*) 'Gauss sector: defaulting to EVEN (Q_r = +1)'
           end select
           
-          ! Allocate cache for star product (optional, for efficiency)
-          Allocate(star_product_cache(Latt%N, Ltrot))
-          star_product_cache = 0  ! Will be computed dynamically
+          ! ============================================================
+          ! Compute Gamma_Gauss = -0.5 * ln(tanh(epsilon * h))  [PRX A6]
+          ! ============================================================
+          ! epsilon = dtau, h = Ham_h (transverse field strength)
+          epsilon_h = Dtau * Ham_h
           
-          ! Setup Gauss weight factors W_r(lambda, G_r) = (1/4)(1+lambda)(1+lambda*G_r)
-          ! This is the exact lambda-expansion of the projector P_r = (1+G_r)/2
-          !
-          ! For lambda = +1, G_r = +1:  W = (1/4)(2)(2) = 1
-          ! For lambda = +1, G_r = -1:  W = (1/4)(2)(0) = 0  (Gauss violation KILLED)
-          ! For lambda = -1, G_r = +1:  W = (1/4)(0)(0) = 0  
-          ! For lambda = -1, G_r = -1:  W = (1/4)(0)(2) = 0  (Gauss violation KILLED)
-          !
-          ! Key: configurations with G_r = -1 are STRICTLY EXCLUDED regardless of lambda
-          DW_Gauss_weight( 1,  1) = 1.d0    ! lambda=+1, G_r=+1: (1+1)(1+1)/4 = 1
-          DW_Gauss_weight( 1, -1) = 0.d0    ! lambda=+1, G_r=-1: (1+1)(1-1)/4 = 0
-          DW_Gauss_weight(-1,  1) = 0.d0    ! lambda=-1, G_r=+1: (1-1)(1-1)/4 = 0
-          DW_Gauss_weight(-1, -1) = 0.d0    ! lambda=-1, G_r=-1: (1-1)(1+1)/4 = 0
+          If (Ham_h > Zero) then
+             ! gamma = -0.5 * ln(tanh(epsilon * h))
+             Gamma_Gauss = -0.5d0 * log(tanh(epsilon_h))
+             Write(6,*) 'Gamma_Gauss = ', Gamma_Gauss, ' (epsilon*h = ', epsilon_h, ')'
+          else
+             ! When h -> 0, gamma -> infinity; set to large value or disable
+             Gamma_Gauss = 0.d0
+             Write(6,*) 'WARNING: Ham_h = 0, Gamma_Gauss set to 0 (no transverse field)'
+          endif
           
-          Write(6,*) 'Strict Gauss constraint initialized:'
-          Write(6,*) '  Sites: ', Latt%N, '  Time slices: ', Ltrot
-          Write(6,*) '  Weight W(+1,+1)=1, W(+1,-1)=0, W(-1,+1)=0, W(-1,-1)=0'
-          Write(6,*) '  Gauss-violating configurations strictly excluded'
+          Write(6,*) '============================================================'
+          Write(6,*) 'Strict Gauss constraint initialized (PRX Appendix A):'
+          Write(6,*) '  lambda is TAU-INDEPENDENT: lambda_field(site)'
+          Write(6,*) '  Sites: ', Latt%N
+          Write(6,*) '  W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))'
+          Write(6,*) '  Fermion: det(1 + P[lambda] * B_total)'
+          Write(6,*) '============================================================'
 
         End Subroutine Setup_Gauss_constraint
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes tau_z at time slice 0 for site I.
+!> This is needed for the PRX A6 boundary coupling.
+!--------------------------------------------------------------------
+        Integer Function Get_Tau_Z_At_Time_0(I)
+
+          Implicit none
+          Integer, Intent(IN) :: I
+          
+          Integer, allocatable :: Isigma(:)
+          
+          If (Abs(Ham_T) < Zero) then
+             Get_Tau_Z_At_Time_0 = 1
+             return
+          endif
+          
+          Allocate(Isigma(Latt%N))
+          Call Hamiltonian_set_Z2_matter(Isigma, 1)  ! tau = 1 (first slice)
+          Get_Tau_Z_At_Time_0 = Isigma(I)
+          Deallocate(Isigma)
+
+        End Function Get_Tau_Z_At_Time_0
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes tau_z at time slice M-1 (Ltrot) for site I.
+!> This is needed for the PRX A6 boundary coupling.
+!--------------------------------------------------------------------
+        Integer Function Get_Tau_Z_At_Time_M1(I)
+
+          Implicit none
+          Integer, Intent(IN) :: I
+          
+          Integer, allocatable :: Isigma(:)
+          
+          If (Abs(Ham_T) < Zero) then
+             Get_Tau_Z_At_Time_M1 = 1
+             return
+          endif
+          
+          Allocate(Isigma(Latt%N))
+          Call Hamiltonian_set_Z2_matter(Isigma, Ltrot)  ! tau = M-1 (last slice)
+          Get_Tau_Z_At_Time_M1 = Isigma(I)
+          Deallocate(Isigma)
+
+        End Function Get_Tau_Z_At_Time_M1
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes the Gauss action for site I following PRX A6:
+!>   S_i = -gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1)
+!>
+!> @param[IN] I  Integer, site index
+!> @return S_i (real value)
+!--------------------------------------------------------------------
+        Real (Kind=Kind(0.d0)) Function Compute_Gauss_Action_PRX(I)
+
+          Implicit none
+          Integer, Intent(IN) :: I
+          
+          Integer :: tau_z_0, tau_z_M1, lambda_i
+          
+          If (.not. UseStrictGauss) then
+             Compute_Gauss_Action_PRX = 0.d0
+             return
+          endif
+          
+          tau_z_0  = Get_Tau_Z_At_Time_0(I)
+          tau_z_M1 = Get_Tau_Z_At_Time_M1(I)
+          lambda_i = lambda_field(I)
+          
+          ! S_i = -gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1)
+          Compute_Gauss_Action_PRX = -Gamma_Gauss * real(tau_z_0 * lambda_i * tau_z_M1, kind(0.d0))
+
+        End Function Compute_Gauss_Action_PRX
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes the Gauss weight ratio for lambda flip at site I (PRX A6).
+!> When lambda_i -> -lambda_i:
+!>   R = exp(2 * gamma * tau_z(i,0) * tau_z(i,M-1) * lambda_i^old)
+!>
+!> @param[IN] I  Integer, site index
+!> @return Weight ratio for lambda flip
+!--------------------------------------------------------------------
+        Real (Kind=Kind(0.d0)) Function Compute_Gauss_Weight_Ratio_Lambda_PRX(I)
+
+          Implicit none
+          Integer, Intent(IN) :: I
+          
+          Integer :: tau_z_0, tau_z_M1, lambda_old
+          Real (Kind=Kind(0.d0)) :: exponent
+          
+          If (.not. UseStrictGauss) then
+             Compute_Gauss_Weight_Ratio_Lambda_PRX = 1.d0
+             return
+          endif
+          
+          tau_z_0  = Get_Tau_Z_At_Time_0(I)
+          tau_z_M1 = Get_Tau_Z_At_Time_M1(I)
+          lambda_old = lambda_field(I)
+          
+          ! R = exp(2 * gamma * tau_z(i,0) * tau_z(i,M-1) * lambda_old)
+          exponent = 2.d0 * Gamma_Gauss * real(tau_z_0 * tau_z_M1 * lambda_old, kind(0.d0))
+          Compute_Gauss_Weight_Ratio_Lambda_PRX = exp(exponent)
+
+        End Function Compute_Gauss_Weight_Ratio_Lambda_PRX
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes the change in Gauss action when tau field is updated.
+!> Delta_S = gamma * [tau_z_0^new * lambda * tau_z_M1^new 
+!>                  - tau_z_0^old * lambda * tau_z_M1^old]
+!>
+!> @param[IN] I  Integer, site index
+!> @param[IN] tau_z_0_old, tau_z_M1_old  Old boundary values
+!> @param[IN] tau_z_0_new, tau_z_M1_new  New boundary values
+!> @return Delta S_Gauss
+!--------------------------------------------------------------------
+        Real (Kind=Kind(0.d0)) Function Compute_Delta_S_Gauss_Tau_Update(I, &
+             & tau_z_0_old, tau_z_M1_old, tau_z_0_new, tau_z_M1_new)
+
+          Implicit none
+          Integer, Intent(IN) :: I
+          Integer, Intent(IN) :: tau_z_0_old, tau_z_M1_old
+          Integer, Intent(IN) :: tau_z_0_new, tau_z_M1_new
+          
+          Integer :: lambda_i
+          Real (Kind=Kind(0.d0)) :: S_old, S_new
+          
+          If (.not. UseStrictGauss) then
+             Compute_Delta_S_Gauss_Tau_Update = 0.d0
+             return
+          endif
+          
+          lambda_i = lambda_field(I)
+          
+          S_old = -Gamma_Gauss * real(tau_z_0_old * lambda_i * tau_z_M1_old, kind(0.d0))
+          S_new = -Gamma_Gauss * real(tau_z_0_new * lambda_i * tau_z_M1_new, kind(0.d0))
+          
+          Compute_Delta_S_Gauss_Tau_Update = S_new - S_old
+
+        End Function Compute_Delta_S_Gauss_Tau_Update
 
 !--------------------------------------------------------------------
 !> @author
@@ -1387,19 +1533,17 @@
 !> ALF Collaboration
 !>
 !> @brief
-!> Computes the full Gauss operator for observables:
-!>   G_r = Q_r * (-1)^{n_r} * tau_r^x * X_r
-!> where:
-!>   Q_r = background charge (sector selection)
-!>   (-1)^n_r = fermion parity from Green function
-!>   tau_r^x = site matter field
-!>   X_r = star product of gauge fields
+!> Computes the Gauss operator for observables (PRX Appendix A):
+!>   G_r = Q_r * tau_r^x * X_r
 !>
-!> This is the version used for measuring observables (requires Green function).
+!> IMPORTANT: In the orthogonal-fermion/slave-spin construction (PRX),
+!> the fermion parity (-1)^n_f is ABSORBED into the tau spin structure!
+!> Therefore, the Gauss operator does NOT have an explicit (-1)^n_f term
+!> in the path integral formulation.
 !>
 !> @param[IN] I  Integer, site index
 !> @param[IN] nt Integer, time slice
-!> @param[IN] GRC Complex(:,:,:), density matrix <c^dag c>
+!> @param[IN] GRC Complex(:,:,:), density matrix <c^dag c> (not used in PRX formulation)
 !> @return Gauss operator expectation value
 !--------------------------------------------------------------------
         Complex (Kind=Kind(0.d0)) Function Compute_Gauss_Operator(I, nt, GRC)
@@ -1411,7 +1555,6 @@
           
           ! Local
           Integer :: X_r, tau_r_x, Q_r, nt1
-          Complex (Kind=Kind(0.d0)) :: Z_n  ! (-1)^n factor
           Integer, allocatable :: Isigma(:), Isigmap1(:)
           
           If (.not. UseStrictGauss) then
@@ -1440,15 +1583,9 @@
              tau_r_x = 1
           endif
           
-          ! (-1)^n_r = 1 - 2*n_r for each spin
-          ! For N_SUN colors, the factor is (1 - 2*<n_r>)^N_SUN
-          ! where <n_r> = GRC(r,r,1) (for flavor 1)
-          Z_n = cmplx(1.d0, 0.d0, kind(0.d0)) - cmplx(2.d0, 0.d0, kind(0.d0)) * GRC(I, I, 1)
-          Z_n = Z_n**N_SUN
-          
-          ! G_r = Q_r * (-1)^n_r * tau_r^x * X_r
-          Compute_Gauss_Operator = cmplx(real(Q_r, kind(0.d0)), 0.d0, kind(0.d0)) * Z_n * &
-               & cmplx(real(tau_r_x * X_r, kind(0.d0)), 0.d0, kind(0.d0))
+          ! G_r = Q_r * tau_r^x * X_r
+          ! NOTE: NO (-1)^n_f factor! This is absorbed in orthogonal-fermion construction.
+          Compute_Gauss_Operator = cmplx(real(Q_r * tau_r_x * X_r, kind(0.d0)), 0.d0, kind(0.d0))
 
         End Function Compute_Gauss_Operator
 
@@ -2000,24 +2137,25 @@
            enddo
         endif
         
-        ! Initialize lambda field for strict Gauss constraint
-        ! Field type 5: Lambda field at each site
+        ! ============================================================
+        ! Initialize lambda field for strict Gauss constraint (PRX A6)
+        ! CRITICAL: lambda is TAU-INDEPENDENT per PRX Appendix A!
+        ! ============================================================
+        ! We still use Field_type = 5 in nsigma for ALF compatibility,
+        ! but lambda_field(site) is the authoritative source.
+        ! All time slices share the same lambda value for each site.
         If (UseStrictGauss) then
-           Do nt = 1, Ltrot
-              Do I = 1, Latt%N
-                 nc = Field_list(I, 3, 5)  ! n_orientation = 3, field_type = 5
-                 ! Initialize all lambda to +1 (or random)
-                 Initial_field(nc, nt) = cmplx(1.D0, 0.d0, Kind(0.d0))
-                 ! Optionally start with random lambda configuration
-                 ! if (ranf_wrap() > 0.5D0) Initial_field(nc, nt) = cmplx(-1.D0, 0.d0, Kind(0.d0))
-                 
-                 ! Note: lambda_field array is only for debugging/legacy purposes
-                 ! The actual lambda values are read from nsigma%i during MC updates
-                 ! via Field_list(I, 3, 5) in Compute_Gauss_Phase
-                 lambda_field(I, nt) = nint(real(Initial_field(nc, nt)))
+           Do I = 1, Latt%N
+              ! Initialize lambda to +1 (TAU-INDEPENDENT)
+              lambda_field(I) = 1
+              
+              ! For ALF compatibility, set nsigma for all tau to same value
+              nc = Field_list(I, 3, 5)
+              Do nt = 1, Ltrot
+                 Initial_field(nc, nt) = cmplx(real(lambda_field(I), kind(0.d0)), 0.d0, Kind(0.d0))
               Enddo
            Enddo
-           Write(6,*) 'Lambda field initialized for strict Gauss constraint'
+           Write(6,*) 'Lambda field initialized (TAU-INDEPENDENT per PRX A6)'
         endif
 
         deallocate (Isigma, Isigma1)
