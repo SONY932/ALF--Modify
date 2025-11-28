@@ -1020,12 +1020,13 @@ Program Main
                 ! Sherman-Morrison to update GR. B_lambda_slice is also updated
                 ! synchronously when a lambda flip is accepted.
                 ! ================================================================
-                If (ham%Use_Strict_Gauss()) then
-                   Do nf_eff = 1, N_FL_eff
-                      nf = Calc_Fl_map(nf_eff)
-                      Call ham%Sweep_Lambda(GR(:,:,nf))
-                   Enddo
-                Endif
+               If (ham%Use_Strict_Gauss()) then
+                  Do nf_eff = 1, N_FL_eff
+                     nf = Calc_Fl_map(nf_eff)
+                     ! Pass Phase to accumulate sign correctly
+                     Call ham%Sweep_Lambda(GR(:,:,nf), Phase)
+                  Enddo
+               Endif
                 
                 IF ( LTAU == 1 .and. .not. Projector ) then
                    Call TAU_M( udvst, GR, PHASE, NSTM, NWRAP, STAB_NT, LOBS_ST, LOBS_EN )

@@ -886,18 +886,18 @@
 !> This base implementation does nothing.
 !> Override in Hamiltonian submodule for models with Gauss constraint.
 !>
-!> @param [INOUT] G   Complex(:,:)
-!> \verbatim
-!>  Equal-time Green function. Modified in place by lambda updates.
-!> \endverbatim
+!> @param [INOUT] G      Complex(:,:), equal-time Green function
+!> @param [INOUT] Phase  Complex, optional, global phase for sign accumulation
 !-------------------------------------------------------------------
-         Subroutine Sweep_Lambda_base(G)
+         Subroutine Sweep_Lambda_base(G, Phase)
            Implicit none
            
            Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: G(:,:)
+           Complex (Kind=Kind(0.d0)), INTENT(INOUT), optional :: Phase
            
            ! Default implementation: do nothing
            ! Override in Hamiltonian submodule for strict Gauss constraint
+           ! The Phase parameter is used to accumulate sign when updates are accepted
            
          end Subroutine Sweep_Lambda_base
 

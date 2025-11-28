@@ -1114,7 +1114,7 @@
           Implicit none
           
           Integer :: I, Ix, Iy
-          Real (Kind=Kind(0.d0)) :: epsilon_h
+          Real (Kind=Kind(0.d0)) :: epsilon_h, Gamma_max
           
           ! ============================================================
           ! CRITICAL: lambda is TAU-INDEPENDENT per PRX Appendix A!
@@ -1154,16 +1154,48 @@
           ! Compute Gamma_Gauss = -0.5 * ln(tanh(epsilon * h))  [PRX A6]
           ! ============================================================
           ! epsilon = dtau, h = Ham_h (transverse field strength)
+          !
+          ! Numerical stability:
+          ! When epsilon*h is very small, tanh(epsilon*h) ~ epsilon*h
+          ! and gamma ~ -0.5 * ln(epsilon*h) -> infinity
+          ! We use a cutoff to avoid numerical overflow.
+          ! 
+          ! Physical interpretation of limits:
+          ! - gamma -> infinity: strict projection, only configs with
+          !   tau_z(0) * lambda * tau_z(M-1) = +1 survive
+          ! - gamma -> 0: no constraint from lambda boundary term
+          ! ============================================================
           epsilon_h = Dtau * Ham_h
           
-          If (Ham_h > Zero) then
-             ! gamma = -0.5 * ln(tanh(epsilon * h))
-             Gamma_Gauss = -0.5d0 * log(tanh(epsilon_h))
+          ! Maximum gamma value to avoid overflow (exp(2*Gamma_max) ~ 10^87)
+          Gamma_max = 100.d0
+          
+          If (Ham_h > Zero .and. epsilon_h > 1.d-10) then
+             ! Standard case: gamma = -0.5 * ln(tanh(epsilon * h))
+             If (epsilon_h > 0.01d0) then
+                ! For larger epsilon*h, use exact formula
+                Gamma_Gauss = -0.5d0 * log(tanh(epsilon_h))
+             else
+                ! For small epsilon*h, use asymptotic expansion
+                ! tanh(x) ~ x - x^3/3, so -ln(tanh(x)) ~ -ln(x) + x^2/3
+                ! gamma ~ -0.5 * ln(epsilon*h) = 0.5 * ln(1/(epsilon*h))
+                Gamma_Gauss = -0.5d0 * log(epsilon_h) + epsilon_h**2 / 6.d0
+             endif
+             
+             ! Apply cutoff for numerical stability
+             If (Gamma_Gauss > Gamma_max) then
+                Write(6,*) 'WARNING: Gamma_Gauss capped at ', Gamma_max, &
+                           ' (original = ', Gamma_Gauss, ')'
+                Gamma_Gauss = Gamma_max
+             endif
+             
              Write(6,*) 'Gamma_Gauss = ', Gamma_Gauss, ' (epsilon*h = ', epsilon_h, ')'
           else
-             ! When h -> 0, gamma -> infinity; set to large value or disable
-             Gamma_Gauss = 0.d0
-             Write(6,*) 'WARNING: Ham_h = 0, Gamma_Gauss set to 0 (no transverse field)'
+             ! When h -> 0, gamma -> infinity; use maximum value for strict projection
+             ! This effectively forces tau_z(0) * lambda * tau_z(M-1) = +1
+             Gamma_Gauss = Gamma_max
+             Write(6,*) 'WARNING: Ham_h ~ 0, Gamma_Gauss set to max = ', Gamma_max
+             Write(6,*) '         (strict projection limit)'
           endif
           
           ! ============================================================
@@ -1307,8 +1339,19 @@
 !>
 !> @brief
 !> Computes the Gauss weight ratio for lambda flip at site I (PRX A6).
-!> When lambda_i -> -lambda_i:
-!>   R = exp(2 * gamma * tau_z(i,0) * tau_z(i,M-1) * lambda_i^old)
+!>
+!> When lambda_i -> -lambda_i (i.e., lambda_new = -lambda_old):
+!>   W_old = exp(gamma * tau_z_0 * lambda_old * tau_z_M1)
+!>   W_new = exp(gamma * tau_z_0 * (-lambda_old) * tau_z_M1)
+!>   R = W_new / W_old = exp(-2 * gamma * tau_z_0 * tau_z_M1 * lambda_old)
+!>
+!> NOTE: The sign is NEGATIVE (-2 * gamma), not positive!
+!>
+!> Physical interpretation:
+!> - If current config satisfies tau_z_0 * lambda_old * tau_z_M1 = +1 (good config),
+!>   then R = exp(-2*gamma) < 1, flip is likely rejected (stay in good config)
+!> - If current config violates, tau_z_0 * lambda_old * tau_z_M1 = -1 (bad config),
+!>   then R = exp(+2*gamma) > 1, flip is accepted (move to good config)
 !>
 !> @param[IN] I  Integer, site index
 !> @return Weight ratio for lambda flip
@@ -1320,6 +1363,7 @@
           
           Integer :: tau_z_0, tau_z_M1, lambda_old
           Real (Kind=Kind(0.d0)) :: exponent
+          Real (Kind=Kind(0.d0)), parameter :: exp_max = 200.d0  ! Prevent overflow
           
           If (.not. UseStrictGauss) then
              Compute_Gauss_Weight_Ratio_Lambda_PRX = 1.d0
@@ -1330,9 +1374,20 @@
           tau_z_M1 = Get_Tau_Z_At_Time_M1(I)
           lambda_old = lambda_field(I)
           
-          ! R = exp(2 * gamma * tau_z(i,0) * tau_z(i,M-1) * lambda_old)
-          exponent = 2.d0 * Gamma_Gauss * real(tau_z_0 * tau_z_M1 * lambda_old, kind(0.d0))
-          Compute_Gauss_Weight_Ratio_Lambda_PRX = exp(exponent)
+          ! R = exp(-2 * gamma * tau_z(i,0) * tau_z(i,M-1) * lambda_old)
+          ! Note the NEGATIVE sign: this is W_new / W_old
+          exponent = -2.d0 * Gamma_Gauss * real(tau_z_0 * tau_z_M1 * lambda_old, kind(0.d0))
+          
+          ! Numerical stability: cap exponent to avoid overflow/underflow
+          If (exponent > exp_max) then
+             ! R is very large, flip will definitely be accepted
+             Compute_Gauss_Weight_Ratio_Lambda_PRX = exp(exp_max)
+          elseif (exponent < -exp_max) then
+             ! R is very small, flip will definitely be rejected
+             Compute_Gauss_Weight_Ratio_Lambda_PRX = 0.d0
+          else
+             Compute_Gauss_Weight_Ratio_Lambda_PRX = exp(exponent)
+          endif
 
         End Function Compute_Gauss_Weight_Ratio_Lambda_PRX
 
@@ -2243,18 +2298,26 @@
 !> Uses Metropolis acceptance with bosonic weight (PRX A6) and
 !> fermionic determinant ratio (Sherman-Morrison).
 !>
-!> @param [INOUT] G   Complex(:,:), equal-time Green function at reference time
+!> @param [INOUT] G      Complex(:,:), equal-time Green function at reference time
+!> @param [INOUT] Phase  Complex, global phase for sign accumulation (optional)
+!>
+!> @details
+!> Sign handling: The phase/sign is properly accumulated when updates
+!> are accepted, following the ALF convention:
+!>   Phase_new = Phase_old * R_tot / |R_tot|
+!> This ensures the sign problem is correctly tracked.
 !--------------------------------------------------------------------
-        Subroutine Sweep_Lambda(G)
+        Subroutine Sweep_Lambda(G, Phase)
           
           Implicit none
           
           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: G(:,:)
+          Complex (Kind=Kind(0.d0)), INTENT(INOUT), optional :: Phase
           
           ! Local
           Integer :: i_site, lambda_old
-          Real (Kind=Kind(0.d0)) :: R_bose, R_tot, rand_val
-          Complex (Kind=Kind(0.d0)) :: R_ferm
+          Real (Kind=Kind(0.d0)) :: R_bose, Weight, rand_val
+          Complex (Kind=Kind(0.d0)) :: R_ferm, R_tot, Phase_ratio
           
           If (.not. UseStrictGauss) return
           
@@ -2268,30 +2331,26 @@
              ! --- Fermionic determinant ratio (Sherman-Morrison) ---
              Call Lambda_Ferm_Ratio_site(i_site, G, R_ferm)
              
-             ! --- Metropolis acceptance ---
-             R_tot = R_bose * abs(R_ferm)
+             ! --- Total ratio (complex) ---
+             R_tot = cmplx(R_bose, 0.d0, kind(0.d0)) * R_ferm
+             
+             ! --- Metropolis acceptance using |R_tot| ---
+             ! Sign/phase is accumulated separately after acceptance
+             Weight = abs(R_tot)
              Call random_number(rand_val)
              
-             If (rand_val < R_tot) then
+             If (rand_val < Weight) then
                 ! Accept the flip
                 lambda_field(i_site) = -lambda_old
                 
-                ! Update Green function via Sherman-Morrison
-                ! NOTE: The simplified formula G' = G + 2*G[:,i]*(e_i - G[i,:])/R
-                ! uses only G, not B_lambda_slice. This is because B*G = 1 - G.
-                Call Lambda_Update_Green_site(i_site, G, R_ferm)
+                ! Accumulate phase/sign: Phase = Phase * R_tot / |R_tot|
+                If (present(Phase) .and. Weight > 0.d0) then
+                   Phase_ratio = R_tot / cmplx(Weight, 0.d0, kind(0.d0))
+                   Phase = Phase * Phase_ratio
+                Endif
                 
-                ! ============================================================
-                ! NOTE: B_lambda_slice update is NO LONGER NEEDED here!
-                ! ============================================================
-                ! The simplified Sherman-Morrison formula uses R = 2*G_{ii} - 1
-                ! and G' = G + 2*G[:,i]*(e_i - G[i,:])/R, which only depends on G.
-                ! This eliminates the need to keep B_lambda_slice synchronized.
-                !
-                ! B_lambda_slice is still saved in Apply_P_Lambda_To_B for
-                ! potential future use (debugging, alternative methods), but
-                ! it is not used in the current lambda update implementation.
-                ! ============================================================
+                ! Update Green function via Sherman-Morrison
+                Call Lambda_Update_Green_site(i_site, G, R_ferm)
              Endif
           Enddo
           
