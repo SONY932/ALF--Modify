@@ -1959,6 +1959,24 @@
 !> @param [IN] nf_eff   Integer, effective flavor index
 !--------------------------------------------------------------------
         Subroutine Apply_P_Lambda_To_Green(GR, nf_eff)
+          !
+          ! ⚠️ WARNING: This is a SIMPLIFIED implementation!
+          !
+          ! The correct PRX A6 relation is:
+          !   G' = (1 + P*B)^{-1}
+          !
+          ! But this subroutine computes:
+          !   G' = P * G = P * (1 + B)^{-1}
+          !
+          ! These are NOT equivalent unless all lambda_i = +1!
+          !
+          ! For the mathematically correct implementation, one needs to either:
+          ! (A) Modify B_total before CGR: B_eff = P * B, then G = (1+B_eff)^{-1}
+          ! (B) Use Woodbury formula: G' = (I + G*(P-I)*B)^{-1} * G
+          !
+          ! The current simplified implementation is only approximate when lambda_i = -1.
+          ! See Z2_Strict_Gauss_Constraint.md Section 3.4.5 for details.
+          !
 
           Implicit none
           
@@ -1973,11 +1991,11 @@
           
           N_dim = size(GR, 1)
           
-          ! Apply P[lambda] transformation to Green function
-          ! For det(1 + P*B), the Green function transforms as:
-          ! G_ij -> lambda_i * G_ij (left multiplication by P)
+          ! Apply P[lambda] transformation to Green function (SIMPLIFIED VERSION)
+          ! This computes G' = P * G, which is an approximation.
+          ! The correct formula for det(1 + P*B) requires Woodbury correction.
           !
-          ! This is equivalent to modifying the boundary conditions:
+          ! Boundary condition interpretation:
           ! - lambda_i = +1: periodic BC at site i
           ! - lambda_i = -1: antiperiodic BC at site i
           

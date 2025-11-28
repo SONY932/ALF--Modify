@@ -166,56 +166,122 @@ $$P_{ij}[\lambda] = \lambda_i \cdot \delta_{ij}$$
 
 ### 3.4 ALF 实现：P[λ] 在 wrap-up 层的插入
 
-#### 3.4.1 为什么 P[λ] 只能作用在 wrap-up 最后？
+#### 3.4.1 核心原则
 
-PRX Appendix A 给的传播子结构是：
+> 🚨 **P[λ] 只能作用一次，只在完整 B_total 乘完后！**
+> 
+> 在 ALF 中，任意时间切片的等时 Green function 构造都依赖"从该时间片出发、沿虚时间跑一整圈"的 B 链。P[λ] **必须且只能**乘在这条完整链的某一端（统一乘在左端），不能：
+> - 在每个 stabilizer block 上分别乘 P[λ]
+> - 在 GRUP 和 GRDW 各乘一次
+> - 在局部 Green function 计算中反复插入
 
+PRX Appendix A 原文：
 > "the fermion propagator is modified by inserting a diagonal matrix with diagonal elements λ_i at the **temporal boundary**"
 
 对应路径积分图像：
 ```
 τ = 0 ----- B(1) ----- τ = 1 ----- B(2) ----- ... ----- τ = M-1 ---- wrap ----> τ = M (=0)
+                                                                      ↑
+                                                             P[λ] 只在这里作用！
 ```
 
-P[λ] 把 τ=M 和 τ=0 的费米子场关系乘以 λ_i，因此必须在：
-- 所有 B(τ) 乘完之后
-- **wrap-up 时构造矩阵 1+B_total 时**
+#### 3.4.2 ALF 中"wrap-up"的具体位置
 
-#### 3.4.2 ALF wrap-up 机制
-
-ALF 的时间推进流程：
+ALF Green function 计算流程（`cgr1_mod.F90` 的 CGR）：
 1. **逐 τ 构造 B(τ)**
-2. **分组（stabilization blocks）进行 QR 或 LU 稳定**
-3. **最后一个 wrap-up，把稳定块乘起来形成 B_total**
-4. 使用 $G = (1+B_{\text{total}})^{-1}$ 初始化 Green function
+2. **分组进行 QR 或 LU 稳定**
+3. **最后一个 wrap-up，把稳定块乘起来形成完整的 $\mathcal{B}$**
+4. 计算 $G = (1+\mathcal{B})^{-1}$
 
-#### 3.4.3 修改方案
+#### 3.4.3 正确的 P[λ] 插入位置
 
-在 wrap-up 中 B_total 准备好后，改成：
-$$B_{\text{eff}} = P[\lambda] \cdot B_{\text{total}}$$
+> **在 wrap-up 阶段构造完 B_total 后、计算 $G^{-1} = I + B_{\text{total}}$ 之前**
 
-计算 G^{-1} 时使用：
-$$G^{-1} = I + B_{\text{eff}}$$
-
-实现伪代码：
 ```fortran
-! 标准 wrap-up 完成后
+! ========================================
+! 正确做法：在 wrap-up 层、构造最终 B_total 后插入
+! ========================================
+
+! wrap-up 完成后的 B_total（已经是完整的一圈传播）
 B_total = B(M) * B(M-1) * ... * B(1)
 
-! 构造对角矩阵 P[lambda]
-do i = 1, N_sites
-    P_lambda(i, i) = lambda_field(i)
-    ! 如果有两个自旋自由度
-    P_lambda(i+N_sites, i+N_sites) = lambda_field(i)
-enddo
-
-! 应用边界条件修正（P 乘在左边！）
-B_eff = matmul(P_lambda, B_total)
+! P[λ] 只乘一次，乘在左边
+B_eff = P[lambda] * B_total
 
 ! 计算 Green function
 Ginv = I + B_eff
 G = inverse(Ginv)
 ```
+
+#### 3.4.4 不正确做法的例子
+
+```fortran
+! ========================================
+! ❌ 错误做法 1：在 CGR 的局部 GRUP 上乘 P[λ]
+! ========================================
+! CGR 内部的 GRUP 是局部传播子，不是完整的一圈
+! 如果在这里乘 P[λ]，会导致某些时间片的 G 包含 P[λ] 两次，某些不含
+
+! ❌ 错误做法 2：在每个 stabilizer block 上乘 P[λ]
+! ========================================
+! 会导致 P[λ] 被乘了多次（有多少个 block 就乘多少次）
+
+! ❌ 错误做法 3：在 GRUP 和 GRDW 各乘一次
+! ========================================
+! 会导致 P[λ] 被乘了两次
+```
+
+#### 3.4.5 与 CGR 流程的集成方案
+
+在 ALF 中，最终 Green function 由 CGR 输出。
+
+> 🚨 **关键数学问题**
+>
+> 设 $G = (1+B)^{-1}$（CGR 输出），我们想要 $G' = (1+PB)^{-1}$。
+>
+> **这两者的关系不是简单的 $G' = P \cdot G$！**
+>
+> 正确的关系是（设 $\Delta = P - I$）：
+> $$G' = (I + G \cdot \Delta \cdot B)^{-1} \cdot G$$
+>
+> 当所有 $\lambda_i = +1$ 时 $\Delta = 0$，此时 $G' = G$。
+> 当某些 $\lambda_i = -1$ 时，$\Delta_{ii} = -2$，需要 rank-k 更新。
+
+**方案 A：修改 B_total 构造（推荐 - 数学上正确）**
+
+在构造 B_total 时直接乘 P[λ]，然后正常计算 Green function：
+```fortran
+! 在构造完整 B_total 后、传入 CGR 前
+B_eff = P[lambda] * B_total
+! 然后 CGR 计算 G = (1 + B_eff)^{-1}
+```
+
+这需要修改 ALF 的 wrap-up 流程。
+
+**方案 B：后修正 Green function（需要 B_total）**
+
+如果已经计算了 $G = (1+B)^{-1}$，可以用 Woodbury 公式修正：
+```fortran
+! 设 k 个格点有 lambda_i = -1
+! Delta 是 (N x k) 矩阵，(Delta)_{i,j} = -2 如果 i 是第 j 个 lambda=-1 的格点
+! V^T 是 (k x N) 矩阵，V^T = (B 的对应行)
+
+! G' = (I + G*Delta*V^T)^{-1} * G
+! 用 Sherman-Morrison-Woodbury 公式计算
+```
+
+**方案 C：简化实现（近似 - 仅当 λ 不经常翻转时）**
+
+如果大多数 $\lambda_i = +1$，可以使用当前的简化实现：
+```fortran
+! 当前实现：G' = P * G
+! 这仅在 lambda_i 很少为 -1 时是近似正确的
+! 严格来说这不等价于 (1+PB)^{-1}
+call ham%Apply_P_Lambda_To_Green(GRUP, nf_eff)
+```
+
+> ⚠️ **当前代码状态**：实现的是方案 C（简化版），不是严格正确的 PRX A6 实现。
+> 完整实现需要方案 A 或方案 B。
 
 #### 3.4.4 两自旋自由度的处理
 
@@ -252,13 +318,20 @@ $$W_{\text{Gauss}} = \prod_i e^{\gamma \cdot \tau^z_{i,0} \cdot \lambda_i \cdot 
 
 ---
 
-## 模块 5：蒙特卡洛更新（含 Sherman-Morrison 更新）
+## 模块 5：蒙特卡洛更新
 
-### 5.1 更新 λ(i)
+### 🚨 关键设计决策：λ 是 site-only 变量，独立更新
+
+> **λ 不是 Field_type=5，不走逐时间片更新！**
+> 
+> λ 只有空间索引 `lambda_field(site)`，不出现在 `nsigma(i, nt)` 这类带 τ 下标的数组里。
+> λ 更新通过独立的 `Update_Lambda` 循环，只遍历 site，不遍历 τ。
+
+### 5.1 更新 λ(i)：独立的 site-only 更新
 
 翻转 $\lambda_i \to -\lambda_i$：
 
-**玻色权重比率**：
+**玻色权重比率**（PRX A6）：
 $$R_{\text{bose}}^{(\lambda)} = \exp\left(2\gamma \cdot \tau^z_{i,0} \cdot \tau^z_{i,M-1} \cdot \lambda_i^{\text{old}}\right)$$
 
 **费米子行列式比率**：
@@ -267,86 +340,79 @@ $$R_{\text{ferm}}^{(\lambda)} = \frac{\det(1 + P[\lambda^{\text{new}}] \mathcal{
 **总比率**：
 $$R^{(\lambda)} = R_{\text{bose}}^{(\lambda)} \cdot R_{\text{ferm}}^{(\lambda)}$$
 
-#### 5.1.1 λ 翻转的 Sherman-Morrison rank-1 更新
+#### 5.1.1 情况 A：↑↓ 自旋完全独立（block-diagonal 费米子矩阵）
 
-翻转 $\lambda_i \to -\lambda_i$ 只改变 P[λ] 的一个对角元素：
+若费米子矩阵是 block-diagonal（↑↓ 解耦，无 SO coupling）：
+$$B = \begin{pmatrix} B^\uparrow & 0 \\ 0 & B^\downarrow \end{pmatrix}$$
 
-$$\Delta P = P_{\text{new}} - P_{\text{old}}$$
+可以对每个自旋分开做 **rank-1** 更新：
+$$R_{\text{ferm}} = R_{\text{ferm}}^\uparrow \times R_{\text{ferm}}^\downarrow$$
 
-它只有一个非零元素：
-$$\Delta P_{ii} = -2 \lambda_i^{\text{old}}$$
+其中单自旋的 rank-1 公式：
+$$R_{\text{ferm}}^\sigma = 1 - 2\lambda_i^{\text{old}} \cdot (B^\sigma \cdot G^\sigma)_{ii}$$
 
-因此是 **rank-1** 更新。令：
-- $u = (-2 \lambda_i^{\text{old}}) e_i$（向量，只有第 i 个分量非零）
-- $w^T = B_{\text{row }i}$（B_total 的第 i 行）
+**Sherman-Morrison 更新**（单自旋）：
 
-**Sherman-Morrison 公式**
+$$G^\sigma_{\text{new}} = G^\sigma_{\text{old}} - \frac{G^\sigma_{\text{old}} \cdot u \cdot w^T \cdot G^\sigma_{\text{old}}}{R_{\text{ferm}}^\sigma}$$
 
-对于 $G^{-1}_{\text{new}} = G^{-1}_{\text{old}} + u w^T$：
+其中：
+- $u = (-2 \lambda_i^{\text{old}}) e_i$
+- $w^T = B^\sigma_{\text{row }i}$
 
-$$G_{\text{new}} = G_{\text{old}} - \frac{G_{\text{old}} \cdot u \cdot w^T \cdot G_{\text{old}}}{1 + w^T \cdot G_{\text{old}} \cdot u}$$
+#### 5.1.2 情况 B：自旋混合（SO coupling, pair-hopping 等）
 
-计算成本：O(N²)。
+若存在自旋混合项，费米子矩阵维度是 2N，翻转 λ_i 修改两行：第 i 行和第 i+N 行。
 
-**费米子行列式比率**
+必须使用 **rank-2** 更新：
 
-单自旋自由度：
-$$R_{\text{ferm}}^{(\lambda)} = 1 + w^T \cdot G_{\text{old}} \cdot u$$
+**费米子行列式比率**：
+$$R_{\text{ferm}} = \det(I_2 + V^T \cdot G \cdot U)$$
 
-简化为：
-$$R_{\text{ferm}}^{(\lambda)} = 1 - 2\lambda_i^{\text{old}} \cdot (B \cdot G)_{ii}$$
+其中：
+$$U = \begin{pmatrix} u_\uparrow & 0 \\ 0 & u_\downarrow \end{pmatrix}_{2N \times 2}, \quad
+V = \begin{pmatrix} B_{\text{row }i} \\ B_{\text{row }i+N} \end{pmatrix}^T_{2N \times 2}$$
 
-#### 5.1.2 两自旋自由度的 rank-2 更新
+这是一个 **2×2 行列式**，计算成本 O(1)。
 
-两自旋系统的矩阵维度是 2N。翻转 λ_i 会修改：
-- 第 i 行
-- 第 i+N 行
-
-因此是 **rank-2** 更新。
-
-**rank-2 Sherman-Morrison 公式**：
+**Sherman-Morrison rank-2 更新**：
 $$G_{\text{new}} = G - G \cdot U \cdot (I_2 + V^T \cdot G \cdot U)^{-1} \cdot V^T \cdot G$$
 
-其中 U 是 (2N × 2)，V 是 (2N × 2)。
-
-**费米子行列式比率**（rank-2）：
-$$R_{\text{ferm}}^{(\lambda)} = \det(I_2 + V^T \cdot G_{\text{old}} \cdot U)$$
-
-这是一个 2×2 行列式，计算成本 O(1)。
-
-#### 5.1.3 ALF 实现伪代码
+#### 5.1.3 ALF 实现：独立 λ 更新循环
 
 ```fortran
-subroutine Update_Lambda(i, G, B_total, accept)
-    integer, intent(in) :: i
+!> λ 更新：独立循环遍历所有 site，不遍历 τ
+!> 注意：此示例仅适用于单自旋 / ↑↓ 解耦的情况
+subroutine Update_All_Lambda(G, B_total, N_sites, N_dim)
     complex(8), intent(inout) :: G(:,:)
     complex(8), intent(in) :: B_total(:,:)
-    logical, intent(out) :: accept
+    integer, intent(in) :: N_sites, N_dim
     
-    ! 计算 R_bose
-    tau_z_0 = Get_Tau_Z_At_Time_0(i)
-    tau_z_M1 = Get_Tau_Z_At_Time_M1(i)
-    lambda_old = lambda_field(i)
-    R_bose = exp(2.0d0 * Gamma_Gauss * tau_z_0 * tau_z_M1 * lambda_old)
+    integer :: i
+    real(8) :: R_bose, R_tot
+    complex(8) :: R_ferm, BG_ii
+    integer :: tau_z_0, tau_z_M1, lambda_old
     
-    ! 计算 R_ferm（Sherman-Morrison）
-    ! 单自旋: R_ferm = 1 - 2*lambda_old * sum(B(i,:)*G(:,i))
-    BG_ii = sum(B_total(i,:) * G(:,i))
-    R_ferm = 1.0d0 - 2.0d0 * lambda_old * BG_ii
-    
-    ! 总接受率
-    R_tot = abs(R_bose * R_ferm)
-    
-    if (ranf() < R_tot) then
-        accept = .true.
-        ! 更新 lambda
-        lambda_field(i) = -lambda_old
-        ! 更新 Green function（Sherman-Morrison）
-        ! G_new = G_old - (G*u)*(w^T*G) / (1 + w^T*G*u)
-        ! 这里简化实现...
-    else
-        accept = .false.
-    endif
+    ! 遍历所有 site（不是时间片！）
+    do i = 1, N_sites
+        ! 计算 R_bose（PRX A6）
+        tau_z_0 = Get_Tau_Z_At_Time_0(i)
+        tau_z_M1 = Get_Tau_Z_At_Time_M1(i)
+        lambda_old = lambda_field(i)
+        R_bose = exp(2.0d0 * Gamma_Gauss * tau_z_0 * tau_z_M1 * lambda_old)
+        
+        ! 计算 R_ferm（单自旋 rank-1）
+        BG_ii = sum(B_total(i,:) * G(:,i))
+        R_ferm = 1.0d0 - 2.0d0 * lambda_old * BG_ii
+        
+        ! Metropolis 接受/拒绝
+        R_tot = R_bose * abs(R_ferm)
+        if (ranf() < R_tot) then
+            ! 更新 lambda（site-only 变量）
+            lambda_field(i) = -lambda_old
+            ! Sherman-Morrison 更新 Green function
+            call Update_Green_SM_Lambda(G, i, B_total, N_dim, R_ferm)
+        endif
+    enddo
 end subroutine
 ```
 
@@ -370,15 +436,103 @@ $$\Delta S_{\text{plaq}} = -K_{\text{plaq}} \left[\sigma^z_{\Box}^{\text{new}} -
 
 ## 模块 6：观测量
 
-### 6.1 Gauss 算符期望值
+### 6.1 关于 τ^x/σ^x 的物理解释
+
+> 🚨 **重要澄清：ALF 中存储的 Z₂ 变量 vs. Hamiltonian 中的算符**
+>
+> ALF 中实际存储的 `nsigma`, `ntau` 等变量是 **Z₂ Ising 场**（取值 ±1），对应的是 **σ^z, τ^z 的 classical representation**。
+>
+> 而 Hamiltonian 中的 **σ^x, τ^x** 是通过 **Hubbard-Stratonovich 变换** 映射到这些 Ising 场上的。
+
+#### 从路径积分到观测量的映射关系
+
+1. **MC 采样的是**：`nsigma(bond, tau)`, `ntau(site, tau)` 的配置
+2. **这些配置代表的是**：在该时空点上 σ^z, τ^z 的本征值
+3. **但在 Gauss 算符中出现的是 σ^x, τ^x**
+
+在 slave-spin/orthogonal-fermion 框架中，路径积分表示已经将量子算符映射为经典 Ising 场。因此：
+
+$$G_r = Q_r \cdot \tau_r^x \cdot \prod_{b \in +r} \sigma^x_b$$
+
+在 MC 中**直接用** `ntau(r, tau)` 和 `nsigma(b, tau)` 计算：
+
+$$G_r^{\text{MC}}(\tau) = Q_r \cdot \texttt{ntau}(r, \tau) \cdot \prod_{b \in +r} \texttt{nsigma}(b, \tau)$$
+
+这不是一个"错误"，而是 **路径积分 representation 中 classical field 就代表对应的 Pauli 算符**。
+
+### 6.2 Gauss 算符期望值
 
 $$\langle G_r \rangle = \left\langle Q_r \cdot \tau_r^x \cdot \prod_{b \in +r} \sigma^x_b \right\rangle$$
 
-应接近 $+1$（或 $Q_r$）。
+在 MC 中测量：
+$$\overline{G} = \frac{1}{N_\tau N_s} \sum_{\tau, r} G_r^{\text{MC}}(\tau)$$
 
-### 6.2 Gauss 约束违反度
+应接近 $+1$（严格 projector 情况下）。
 
-$$\langle (G_r - Q_r)^2 \rangle \approx 0$$
+### 6.3 Gauss 约束违反度
+
+$$\text{GaussViol} = \left\langle (G_r - Q_r)^2 \right\rangle = \frac{1}{N_\tau N_s} \sum_{\tau, r} (G_r(\tau) - Q_r)^2$$
+
+- 若 projector 完全精确且无数值误差：GaussViol ≈ 0
+- 实际上可能有极小但非零值（机器精度附近）
+
+---
+
+## 验证 Checklist
+
+### ✅ 数值自检项目
+
+#### 1. Gauss 约束数值检查
+```fortran
+! 测量 ⟨(G_r - Q_r)²⟩
+real(8) :: gauss_viol
+gauss_viol = 0.d0
+do nt = 1, Ltrot
+    do i = 1, Latt%N
+        G_r = Compute_Gauss_Operator_Int(i, nt)
+        gauss_viol = gauss_viol + (G_r - Q_background(i))**2
+    enddo
+enddo
+gauss_viol = gauss_viol / (Ltrot * Latt%N)
+! 期望值：应该在机器精度附近（< 1e-10）
+```
+
+**如果 GaussViol 随时间增大**，检查：
+- P[λ] 是否在所有时间片的 Green 中一致地出现
+- 某些 update 是否忘记乘 bosonic factor
+- stabilizer block 是否重复乘了 P[λ]
+
+#### 2. λ 边界条件检查
+```fortran
+! 测试 1：把所有 λ 固定为 +1
+lambda_field(:) = +1
+! 与不加严格 Gauss projector 的结果比较
+! 应该只在物理 sector 有差异，而不是整体崩掉
+
+! 测试 2：随机翻转几个 λ
+call random_flip_lambda(10)
+! 观测局域 τ^z 或密度
+! 看看是否出现明显 PBC/APBC 的差异
+```
+
+#### 3. Sign 检查
+```fortran
+! 在论文参数点（sign-free 区域）统计平均 sign
+complex(8) :: avg_sign
+! 如果 sign 掉得很快，检查：
+! - P[λ] 是否插错位置
+! - GaussSector / Q_r pattern 是否和原论文一致
+```
+
+### ✅ 必须确认的实现细节
+
+| 检查项 | 期望 | 危险信号 |
+|--------|------|----------|
+| P[λ] 乘的次数 | 完整一圈只乘一次 | 每个 block 乘一次/GRUP GRDW 各乘一次 |
+| λ 翻转时 B_total | 不重算 | 每次翻转都重新计算 B_total |
+| 两自旋 rank-2 | 真正用 rank-2 或分开两个 rank-1 | 偷懒当单 rank-1 用 |
+| λ 存储 | site-only `lambda_field(site)` | 带 τ 下标 `lambda(site, tau)` |
+| λ 更新循环 | 只遍历 site | 遍历 site × tau |
 
 ---
 
@@ -389,6 +543,59 @@ $$\langle (G_r - Q_r)^2 \rangle \approx 0$$
 ```
 UseStrictGauss = .true.
 GaussSector = "even"    ! "even", "odd", "staggered"
+```
+
+### GaussSector 的 Q_r pattern 定义
+
+> 🚨 **必须明确 Q_r 的具体取值！**
+
+| GaussSector | Q_r 定义 | 适用场景 |
+|-------------|----------|----------|
+| `"even"` | $Q_i = +1$ 对所有 site | 标准物理 sector |
+| `"odd"` | $Q_i = -1$ 对所有 site | 全局奇 sector |
+| `"staggered"` | $Q_{x,y} = (-1)^{x+y}$ | A/B 子格交替 |
+
+#### Q_r pattern 的明确公式（Square lattice）
+
+假设 site index 按行优先排列：
+$$i = x + (y - 1) \cdot L_x, \quad x \in [1, L_x], \; y \in [1, L_y]$$
+
+则：
+- **even**：$Q_i = +1$
+- **odd**：$Q_i = -1$
+- **staggered**（棋盘形）：
+  $$Q_i = (-1)^{x + y}$$
+  其中 $(x, y) = (\text{mod}(i-1, L_x) + 1, \; (i-1) / L_x + 1)$
+
+#### ALF 实现
+
+```fortran
+subroutine Setup_Q_Background(Latt, GaussSector)
+    type(Lattice_type), intent(in) :: Latt
+    character(len=*), intent(in) :: GaussSector
+    integer :: i, x, y, Lx, Ly
+    
+    Lx = Latt%L1
+    Ly = Latt%L2
+    
+    select case (trim(GaussSector))
+    case ("even")
+        Q_background(:) = +1
+        
+    case ("odd")
+        Q_background(:) = -1
+        
+    case ("staggered")
+        do i = 1, Latt%N
+            x = mod(i - 1, Lx) + 1
+            y = (i - 1) / Lx + 1
+            Q_background(i) = (-1)**(x + y)
+        enddo
+        
+    case default
+        Q_background(:) = +1
+    end select
+end subroutine
 ```
 
 ### 示例参数文件
@@ -546,12 +753,21 @@ detM = det(Ginv)
    - `S0` 函数已使用 `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` 计算玻色权重
    - 费米子部分通过标准的 Green function 更新机制处理
 
-#### 🔴 高优先级（待进一步优化）
+#### 🔴 高优先级 - 关键问题
 
-1. **λ 全局更新优化**
-   - λ 是 τ-independent 的，理想情况下应通过全局更新处理
-   - 当前实现通过 Field_type=5 的逐时间片更新
-   - 可在 `Global_mod.F90` 中添加专门的 `Global_move_lambda` 函数
+1. **P[λ] 实现的数学正确性问题** ⚠️
+   - **问题**：当前实现 `G' = P * G` 不等于正确的 `G' = (1+PB)^{-1}`
+   - **影响**：当某些 λ_i = -1 时，Green function 和行列式计算不准确
+   - **解决方案选项**：
+     - (A) 修改 ALF wrap-up 流程，在 B_total 上乘 P 后再传入 CGR
+     - (B) 使用 Woodbury 公式后修正：`G' = (I + G*(P-I)*B)^{-1} * G`
+   - **当前状态**：简化实现，仅在所有 λ_i = +1 时严格正确
+
+2. **λ 更新循环的位置**
+   - λ 是 τ-independent 的 site-only 变量
+   - 需要在 MC sweep 中添加独立的 `Update_All_Lambda` 循环
+   - 这个循环只遍历 site，不遍历 τ
+   - **不使用 Field_type=5**，λ 不是 nsigma/ntau 数组的一部分
 
 #### 🟡 中优先级
 

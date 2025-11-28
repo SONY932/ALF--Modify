@@ -175,8 +175,14 @@ module cgr1_mod
         Deallocate(TPUP,TPUP1,TPUPM1, IPVT )
         
         ! Apply P[lambda] for strict Gauss constraint (PRX 10.041057 Appendix A)
-        ! This is done after computing GRUP = (1+B_total)^{-1}
-        ! to get GRUP_eff = (1 + P[lambda]*B_total)^{-1}
+        !
+        ! ⚠️ WARNING: SIMPLIFIED IMPLEMENTATION
+        ! This computes G' = P * G, but the correct PRX A6 formula is:
+        !   G' = (1 + P*B)^{-1}  ≠  P * (1+B)^{-1}
+        !
+        ! For mathematically correct implementation, see Section 3.4.5 of
+        ! Z2_Strict_Gauss_Constraint.md for Woodbury formula approach.
+        !
         If (ham%Use_Strict_Gauss()) then
            Call ham%Apply_P_Lambda_To_Green(GRUP, 1)
         Endif
@@ -451,6 +457,14 @@ module cgr1_mod
         Deallocate(TPUP, DUP, IPVT, VISITED, RHS)
         
         ! Apply P[lambda] for strict Gauss constraint (PRX 10.041057 Appendix A)
+        !
+        ! ⚠️ WARNING: SIMPLIFIED IMPLEMENTATION
+        ! This computes G' = P * G, but the correct PRX A6 formula is:
+        !   G' = (1 + P*B)^{-1}  ≠  P * (1+B)^{-1}
+        !
+        ! For mathematically correct implementation, see Section 3.4.5 of
+        ! Z2_Strict_Gauss_Constraint.md for Woodbury formula approach.
+        !
         If (ham%Use_Strict_Gauss()) then
            Call ham%Apply_P_Lambda_To_Green(GRUP, 1)
         Endif
