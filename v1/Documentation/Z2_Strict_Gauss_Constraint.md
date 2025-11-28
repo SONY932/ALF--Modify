@@ -344,10 +344,13 @@ Lambda 场为第 5 种场类型（Field_type = 5）：
 
 | 函数名 | 功能 | 公式 |
 |--------|------|------|
-| `Compute_Star_Product_X` | 计算 star product | $X_r = \prod_{b \in +r} \sigma_b^x$ |
-| `Compute_Gauss_Operator` | 计算完整 Gauss 算符 | $G_r = Q_r \cdot (-1)^{n_r^f} \cdot \tau_r^x \cdot X_r$ |
-| `Compute_Gauss_Weight` | 计算局域权重 | $W_r = \frac{1}{4}(1+\lambda_r)(1+\lambda_r G_r)$ |
-| `Compute_P_Matrix` | 构造对角矩阵 | $P_{ij} = \lambda_i \delta_{ij}$ |
+| `Compute_Star_Product_X(I, nt)` | 计算 star product | $X_r = \prod_{b \in +r} \sigma_b^x$ |
+| `Compute_Gauss_Operator_Int(I, nt)` | 计算整数 Gauss 算符（用于 MC 更新） | $G_r^{\text{bose}} = Q_r \cdot \tau_r^x \cdot X_r$ |
+| `Compute_Gauss_Operator(I, nt, GRC)` | 计算完整 Gauss 算符（用于观测量） | $G_r = Q_r \cdot (-1)^{n_r^f} \cdot \tau_r^x \cdot X_r$ |
+| `Compute_Gauss_Weight(lambda, G_r)` | 计算局域权重 | $W_r = \frac{1}{4}(1+\lambda)(1+\lambda G_r)$ |
+| `Compute_Gauss_Weight_Ratio(...)` | 计算权重比率 | $R = W_r^{\text{new}} / W_r^{\text{old}}$ |
+
+**注**：P[λ] 对角矩阵通过 `Ham_V` 中 Field_type=5 的 `Op_V` 设置实现，详见代码注释。
 
 ---
 
@@ -406,11 +409,14 @@ $$\forall (r, \tau): \quad G_r(\tau) = Q_r$$
 主要修改的文件：
 - `Prog/Hamiltonians/Hamiltonian_Z2_Matter_smod.F90`
   - 添加 `UseStrictGauss`、`GaussSector` 参数
-  - 添加 `lambda_field`、`Q_background` 存储
-  - 实现 `Compute_Gauss_Weight`、`Compute_P_Matrix` 等函数
-  - 修改 `Ham_V` 加入 P[λ] 矩阵
-  - 修改 `S0` 加入 $S_{\text{Gauss}}$
-  - 修改更新接受率计算
+  - 添加 `lambda_field`、`Q_background`、`DW_Gauss_weight` 存储
+  - 添加 `Compute_Gauss_Operator_Int`、`Compute_Gauss_Weight`、`Compute_Gauss_Weight_Ratio` 函数
+  - 修改 `Compute_Gauss_Operator` 加入 τ 自旋和 Q_r
+  - 修改 `Setup_Gauss_constraint` 初始化背景电荷和权重表
+  - 修改 `Ham_V` 中 Field_type=5 处理 P[λ] 对角算符
+  - 修改 `S0` 函数加入 λ 翻转和 σ 翻转的 Gauss 权重比率
+  - 修改 `Global_move_tau` 加入 τ 翻转的 Gauss 权重比率
+  - 修改 `Obser` 测量 Gauss 和 GaussViol 观测量
 
 ---
 

@@ -720,6 +720,9 @@
           Integer                   ::  ns , nc, n_op, n_op1, ntau_p1, ntau_m1, I, n
           Integer, allocatable      ::  Isigma1(:),Isigma2(:),Isigma3(:)
           Real  (Kind = Kind(0.d0)) ::  S0_Matter, T0_Proposal
+          ! Gauss constraint variables
+          Integer :: lambda_I, G_r_old, G_r_new, nc_lambda
+          Real (Kind = Kind(0.d0)) :: R_Gauss
 
           ! Write(6,*) 'In GLob_move', m,direction,ntau, size(Flip_list,1), Size(Flip_value,1), Flip_list(1)
           ! Ising from n_op = 1,Latt_unit%N_coord*Ndim
@@ -797,6 +800,36 @@
              Call Hamiltonian_set_Z2_matter(Isigma3,ntau_m1)
              !  Check the dynamics and the ergodicity
              S0_Matter = S0_Matter*DW_Matter_tau ( Isigma1(I)*Isigma2(I) ) * DW_Matter_tau( Isigma2(I)*Isigma3(I) )
+          endif
+
+          ! ================================================================
+          ! GAUSS CONSTRAINT: tau spin flip affects G_r at site I
+          ! ================================================================
+          ! Global_move_tau flips the bond matter fields around site I,
+          ! which effectively flips tau_I^x. This changes G_I.
+          ! According to PRX: G_r = Q_r * (-1)^n_r * tau_r^x * X_r
+          ! When tau_I^x flips sign: G_I^new = -G_I^old
+          !
+          ! Weight ratio: R_Gauss = W(lambda_I, G_I^new) / W(lambda_I, G_I^old)
+          ! If G_I^old = +1 and we flip to G_I^new = -1, then R_Gauss = 0
+          ! This STRICTLY FORBIDS any update that violates Gauss law!
+          R_Gauss = 1.d0
+          If (UseStrictGauss) then
+             ! Get lambda value at site I
+             nc_lambda = Field_list(I, 3, 5)
+             lambda_I = nsigma%i(nc_lambda, ntau)
+             
+             ! Compute G_r before the flip (current config)
+             G_r_old = Compute_Gauss_Operator_Int(I, ntau)
+             
+             ! After flipping tau_I^x, G_I changes sign
+             G_r_new = -G_r_old
+             
+             ! Compute Gauss weight ratio
+             R_Gauss = Compute_Gauss_Weight_Ratio(lambda_I, lambda_I, G_r_old, G_r_new)
+             
+             ! Multiply S0_Matter by Gauss weight
+             S0_Matter = S0_Matter * R_Gauss
           endif
 
           T0_Proposal       =  1.d0 - 1.d0/(1.d0+S0_Matter)
