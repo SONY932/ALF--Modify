@@ -160,6 +160,16 @@
         procedure, nopass :: GR_reconstruction => GR_reconstruction_base
         procedure, nopass :: GRT_reconstruction => GRT_reconstruction_base
         procedure, nopass :: Apply_B_HMC => Apply_B_HMC_base
+        !> Apply P[lambda] to B-matrix at boundary for strict Gauss constraint (PRX 10.041057 Appendix A)
+        !> This is the CORRECT implementation: B'_M = P[lambda] * B_M (left multiply)
+        procedure, nopass :: Apply_P_Lambda_To_B => Apply_P_Lambda_To_B_base
+        !> Right multiply by P[lambda]: B'_M = B_M * P[lambda] (for left propagation with B^†)
+        procedure, nopass :: Apply_P_Lambda_To_B_Right => Apply_P_Lambda_To_B_Right_base
+        procedure, nopass :: Use_Strict_Gauss => Use_Strict_Gauss_base
+        !> Sweep over all lambda fields (site-only update with Sherman-Morrison)
+        procedure, nopass :: Sweep_Lambda => Sweep_Lambda_base
+        !> Diagnostic: measure and print Gauss constraint violation
+        procedure, nopass :: GaussViol_Diagnostic => GaussViol_Diagnostic_base
 #ifdef HDF5
         procedure, nopass :: write_parameters_hdf5 => write_parameters_hdf5_base
 #endif
@@ -814,6 +824,131 @@
          end Subroutine GRT_reconstruction_base
          
          
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Checks if strict Gauss constraint is enabled.
+!> By default returns .false. - override in Hamiltonian for models with Gauss constraint.
+!> @return .true. if strict Gauss constraint is active
+!-------------------------------------------------------------------
+         Logical Function Use_Strict_Gauss_base()
+           Implicit none
+           
+           ! Default implementation: no strict Gauss constraint
+           Use_Strict_Gauss_base = .false.
+           
+         end Function Use_Strict_Gauss_base
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Applies P[lambda] to B-matrix at time boundary for strict Gauss constraint.
+!> Following PRX 10.041057 Appendix A:
+!>   B'_M = P[lambda] * B_M  (left multiply P[lambda] on final time slice B-matrix)
+!>
+!> This gives the correct propagator: B_total' = P[lambda] * B_total
+!> so that G = (1 + P[lambda] * B_total)^{-1}
+!>
+!> This base implementation does nothing.
+!> Override in Hamiltonian submodule for models with Gauss constraint.
+!>
+!> @param [INOUT] B_slice   Complex(:,:)
+!> \verbatim
+!>  B-matrix for time slice nt=Ltrot. Modified in place: B'_M = P[lambda] * B_M
+!>  P[lambda] is diagonal with P_ii = lambda_i
+!> \endverbatim
+!> @param [IN] nf   Integer
+!> \verbatim
+!>  Flavor index
+!> \endverbatim
+!-------------------------------------------------------------------
+         Subroutine Apply_P_Lambda_To_B_base(B_slice, nf)
+           Implicit none
+           
+           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: B_slice(:,:)
+           Integer, INTENT(IN) :: nf
+           
+           ! Default implementation: do nothing
+           ! Override in Hamiltonian submodule for strict Gauss constraint
+           
+         end Subroutine Apply_P_Lambda_To_B_base
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Applies P[lambda] to B-matrix from the RIGHT (for left propagation).
+!> B' = B * P[lambda]  (right multiply)
+!> This is used in wrapul where we build B^†, so (P*B)^† = B^† * P.
+!>
+!> This base implementation does nothing.
+!> Override in Hamiltonian submodule for strict Gauss constraint.
+!>
+!> @param [INOUT] B_slice   Complex(:,:)
+!> @param [IN] nf   Integer, flavor index
+!-------------------------------------------------------------------
+         Subroutine Apply_P_Lambda_To_B_Right_base(B_slice, nf)
+           Implicit none
+           
+           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: B_slice(:,:)
+           Integer, INTENT(IN) :: nf
+           
+           ! Default implementation: do nothing
+           ! Override in Hamiltonian submodule for strict Gauss constraint
+           
+         end Subroutine Apply_P_Lambda_To_B_Right_base
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Sweeps over all lambda fields for strict Gauss constraint.
+!> Uses Metropolis acceptance with Sherman-Morrison update.
+!>
+!> This base implementation does nothing.
+!> Override in Hamiltonian submodule for models with Gauss constraint.
+!>
+!> @param [INOUT] G      Complex(:,:), equal-time Green function
+!> @param [INOUT] Phase  Complex, optional, global phase for sign accumulation
+!-------------------------------------------------------------------
+         Subroutine Sweep_Lambda_base(G, Phase)
+           Implicit none
+           
+           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: G(:,:)
+           Complex (Kind=Kind(0.d0)), INTENT(INOUT), optional :: Phase
+           
+           ! Default implementation: do nothing
+           ! Override in Hamiltonian submodule for strict Gauss constraint
+           ! The Phase parameter is used to accumulate sign when updates are accepted
+           
+         end Subroutine Sweep_Lambda_base
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Diagnostic routine to measure and print Gauss constraint violation.
+!> Base implementation does nothing. Override in Hamiltonian submodule.
+!>
+!> @param[IN] sweep_number  Integer, current MC sweep number
+!-------------------------------------------------------------------
+         Subroutine GaussViol_Diagnostic_base(sweep_number)
+           Implicit none
+           
+           Integer, INTENT(IN) :: sweep_number
+           
+           ! Default implementation: do nothing
+           ! Override in Hamiltonian submodule for strict Gauss constraint
+           
+         end Subroutine GaussViol_Diagnostic_base
+
 #ifdef HDF5
          subroutine write_parameters_hdf5_base(filename)
            implicit none

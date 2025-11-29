@@ -34,6 +34,8 @@ module cgr1_mod
   contains
 
       SUBROUTINE CGR(PHASE,NVAR, GRUP, udvr, udvl)
+      !> Note: Strict Gauss constraint (PRX 10.041057) P[lambda] is now applied
+      !> at B-slice level in wrapur_mod.F90, not here. See Apply_P_Lambda_To_B.
 
 !--------------------------------------------------------------------
 !> @author 
@@ -170,6 +172,9 @@ module cgr1_mod
         PHASE = Z1/ABS(Z1)
         CALL udvlocal%dealloc
         Deallocate(TPUP,TPUP1,TPUPM1, IPVT )
+        
+        ! P[lambda] for strict Gauss constraint is now applied at B-slice level
+        ! in wrapur_mod.F90, not here. See Apply_P_Lambda_To_B in Hamiltonian.
 
 #else
 
@@ -438,6 +443,9 @@ module cgr1_mod
             CALL ZGEMM('N', 'C', N_size, N_size, N_size, alpha, RHS(1, 1), N_size, udvr%U(1,1), N_size, beta, GRUP(1, 1), N_size)
         ENDIF
         Deallocate(TPUP, DUP, IPVT, VISITED, RHS)
+        
+        ! P[lambda] for strict Gauss constraint is now applied at B-slice level
+        ! in wrapur_mod.F90, not here. See Apply_P_Lambda_To_B in Hamiltonian.
 #endif
         
       END SUBROUTINE CGR

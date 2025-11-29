@@ -2,123 +2,601 @@
 
 ## 概述
 
-本文档描述了在 ALF (Algorithms for Lattice Fermions) 框架中实现的 Z₂ 规范场耦合费米子模型的**严格 Gauss 约束**投影。
+本文档描述了在 ALF 框架中实现的 Z₂ 规范场耦合费米子模型的**严格 Gauss 约束**投影，严格对标 **PRX 10, 041057 (2020) Appendix A**。
 
-### 物理背景
+---
 
-Gauss 约束的核心要求是：
+## 模块 0：路径积分离散化（PRX A1–A5）
 
-$$G_r(\tau) \equiv (-1)^{n_r(\tau)} \prod_{b\in +r} \sigma^x_b(\tau) = 1,\quad \forall r,\tau$$
+### 0.1 Trotter 分解
 
-通过在虚时间方向引入 Z₂ 拉格朗日乘子场 $\lambda_r(\tau)=\pm1$，可以实现对物理 Hilbert 空间的显式投影。
+$$e^{-\beta H} = \left(e^{-\epsilon H}\right)^M, \quad \epsilon = \beta/M = \Delta\tau$$
 
-投影算符可以写成：
-$$P_r = \frac{1}{2}(1 + G_r) \propto \sum_{\lambda_r=\pm1} \exp\left[ i\lambda_r(\tau)\frac{\pi}{2}\,G_r(\tau)\right]$$
+### 0.2 时间片完备基插入
+
+在每个时间片 $\tau$ 插入 $\tau^z$ 的完备基：
+$$\sum_{\{\tau^z(\tau)\}} |\tau^z(\tau)\rangle\langle\tau^z(\tau)|$$
+
+### 0.3 τ^z 路径积分时间演化项 S_τ-path（🟥 关键模块 #1）
+
+PRX A1–A5 给出了 τ^x 和 τ^z 在 Trotter 分解下的路径积分形式。横场项 $h \tau^x$ 生成**时间方向的最近邻耦合**，行为类似于 1D Ising coupling：
+
+$$S_{\tau\text{-path}} = -K_\tau \sum_{i,\tau} \tau^z_{i,\tau} \cdot \tau^z_{i,\tau+1}$$
+
+其中时间方向的耦合系数为：
+
+$$K_\tau = -\frac{1}{2} \ln[\tanh(\epsilon h)]$$
+
+🚨 **关键点**：这里的 $K_\tau$ 与 Gauss 投影的 $\gamma$ **完全相同**！PRX Appendix A 明确说明它们来自同一个起源（τ^x 的离散化）。
+
+#### ALF 实现
+
+在 ALF 中，时间方向的 τ^z 耦合已经通过 `DW_Matter_tau` 实现：
+```fortran
+! DW_Matter_tau(+1) = tanh(Dtau*Ham_h)  当 tau_z(t) = tau_z(t+1)
+! DW_Matter_tau(-1) = 1/tanh(Dtau*Ham_h) 当 tau_z(t) ≠ tau_z(t+1)
+```
+
+权重比率：
+$$\frac{W(\tau^z_t = \tau^z_{t+1})}{W(\tau^z_t \neq \tau^z_{t+1})} = \tanh(\epsilon h)$$
+
+这与 $K_\tau = -\frac{1}{2}\ln[\tanh(\epsilon h)]$ 给出的 $e^{2K_\tau} = 1/\tanh(\epsilon h)$ 一致。
+
+---
+
+## 模块 1：λ 场的引入方式（PRX A5–A6 核心）
+
+### 1.1 Gauss 算符定义
+
+在 orthogonal-fermion/slave-spin 构造中，费米子奇偶性 $(-1)^{n_f}$ 被吸收到 τ 自旋结构中。Gauss 算符为：
+
+$$G_r = Q_r \cdot \tau_r^x \cdot \prod_{b \in +r} \sigma^x_b$$
+
+**注意**：这里**没有** $(-1)^{n_f}$ 项！
+
+### 1.2 λ 是 τ-independent 的空间场
+
+🚨 **关键点**：λ 只有空间索引，**没有时间索引**！
+
+$$\lambda_i = \pm 1, \quad i \in \text{sites}$$
+
+**不是** `lambda_field(site, tau)`，**而是** `lambda_field(site)`。
+
+### 1.3 Gauss 投影权重（PRX A6）
+
+从 Gauss projector $\hat{P}_i = \frac{1}{2}(1+G_i)$ 出发，经过路径积分推导（PRX A5），得到权重：
+
+$$W_i(\lambda_i; \tau^z_{i,0}, \tau^z_{i,M-1}) \propto e^{\gamma \cdot \tau^z_{i,0} \cdot \lambda_i \cdot \tau^z_{i,M-1}} \tag{A6}$$
+
+其中：
+$$\gamma = -\frac{1}{2}\ln[\tanh(\epsilon \cdot h)]$$
+
+这里：
+- $\tau^z_{i,0}$：格点 $i$ 在 $\tau=0$ 的 τ 自旋
+- $\tau^z_{i,M-1}$：格点 $i$ 在 $\tau=M-1$ 的 τ 自旋
+- $h$：横场强度 (Ham_h)
+- $\epsilon = \Delta\tau$
+
+### 1.4 物理含义
+
+- $\lambda_i = +1$ → **周期边界条件 (PBC)**：$\tau^z_{i,0}$ 和 $\tau^z_{i,M-1}$ 同号有利
+- $\lambda_i = -1$ → **反周期边界条件 (APBC)**：$\tau^z_{i,0}$ 和 $\tau^z_{i,M-1}$ 异号有利
+
+---
+
+## 模块 2：时空 Plaquette 项（🟥 关键模块 #2）
+
+PRX Appendix A 明确指出，Gauss 约束在 σ 场上产生额外的**时空 plaquette** 作用量：
+
+$$S_{\text{plaq}} = -K_{\text{plaq}} \sum_{\Box_{i,\tau}} \sigma^z_{\Box}$$
+
+其中 $\sigma^z_{\Box} = \prod_{b \in \Box} \sigma^z_b$ 是时空 plaquette 上的 gauge 场乘积。
+
+### 2.1 K_plaq 的具体表达式
+
+根据文献 [Gazit 2016 PNAS] 的 τ 方向 link weight，plaquette 耦合系数为：
+
+$$K_{\text{plaq}} = \frac{1}{2}\ln\left(\coth(\epsilon g)\right)$$
+
+其中 $g$ 是 gauge 场的横场强度 (`Ham_g` 在 ALF 中)。
+
+### 2.2 时空 Plaquette 的几何结构
+
+在 (2+1)D 时空中，每个时空 plaquette 包含：
+- 两条**空间方向**的 link：$\sigma^z_b(\tau)$ 和 $\sigma^z_b(\tau+1)$
+- 两条**时间方向**的 link（虚拟）
+
+时空 plaquette 产物：
+$$\sigma^z_{\Box_{i,\mu,\tau}} = \sigma^z_{i,\mu}(\tau) \cdot \sigma^z_{i+\hat{\mu},0}(\tau \to \tau+1) \cdot \sigma^z_{i,\mu}(\tau+1) \cdot \sigma^z_{i,0}(\tau+1 \to \tau)$$
+
+由于时间方向的 link 来自 Gauss 约束的离散化，在实际计算中简化为：
+
+$$\sigma^z_{\Box} \approx \sigma^z_{i,\mu}(\tau) \cdot \sigma^z_{i,\mu}(\tau+1)$$
+
+### 2.3 与 Ham_g 的关系
+
+在 ALF 中，gauge 场的时间演化已通过 `DW_Ising_tau` 实现：
+```fortran
+DW_Ising_tau(+1) = tanh(Dtau*Ham_g)  ! 当 sigma(t) = sigma(t+1)
+DW_Ising_tau(-1) = 1/tanh(Dtau*Ham_g) ! 当 sigma(t) ≠ sigma(t+1)
+```
+
+这对应于：
+$$K_\sigma = -\frac{1}{2}\ln[\tanh(\epsilon g)]$$
+
+### 2.4 ALF 实现
+
+时空 plaquette 在 ALF 中通过 gauge 场的时间方向耦合自动实现。在 `S0` 函数中：
+```fortran
+! Gauge field temporal coupling
+S0 = S0 * DW_Ising_tau(nsigma%i(n,nt) * nsigma%i(n,nt+1))
+S0 = S0 * DW_Ising_tau(nsigma%i(n,nt) * nsigma%i(n,nt-1))
+```
+
+---
+
+## 模块 3：费米子行列式的修正（🟥 关键模块 #3 - PRX A6 后段）
+
+### 3.1 传播子结构
+
+整条虚时间传播子：
+$$\mathcal{B} = B(M) B(M-1) \cdots B(1)$$
+
+其中每个 B-slice：
+$$B(\tau) = e^{-\Delta\tau K} \cdot e^{-\Delta\tau V(\sigma(\tau), \tau(\tau))}$$
+
+### 3.2 λ 修正方式（关键！）
+
+🚨 **关键点**：λ **只在时间闭合处**修改费米子行列式，**不是**逐 τ 乘 P(τ)！
+
+❌ 错误写法：$B(\tau) = P(\tau) B_0(\tau)$
+
+✅ 正确写法：
+$$\det M = \det(1 + P[\lambda] \cdot \mathcal{B})$$
+
+其中对角矩阵：
+$$P_{ij}[\lambda] = \lambda_i \cdot \delta_{ij}$$
+
+### 3.3 物理解释
+
+- $\lambda_i = +1$：费米子在格点 $i$ 满足 PBC
+- $\lambda_i = -1$：费米子在格点 $i$ 满足 APBC
+
+λ 通过修改**时间边界条件**影响费米子行列式。
+
+### 3.4 ALF 实现：P[λ] 在 wrap-up 层的插入
+
+#### 3.4.1 核心原则
+
+> 🚨 **P[λ] 只能作用一次，只在完整 B_total 乘完后！**
+> 
+> 在 ALF 中，任意时间切片的等时 Green function 构造都依赖"从该时间片出发、沿虚时间跑一整圈"的 B 链。P[λ] **必须且只能**乘在这条完整链的某一端（统一乘在左端），不能：
+> - 在每个 stabilizer block 上分别乘 P[λ]
+> - 在 GRUP 和 GRDW 各乘一次
+> - 在局部 Green function 计算中反复插入
+
+PRX Appendix A 原文：
+> "the fermion propagator is modified by inserting a diagonal matrix with diagonal elements λ_i at the **temporal boundary**"
+
+对应路径积分图像：
+```
+τ = 0 ----- B(1) ----- τ = 1 ----- B(2) ----- ... ----- τ = M-1 ---- wrap ----> τ = M (=0)
+                                                                      ↑
+                                                             P[λ] 只在这里作用！
+```
+
+#### 3.4.2 ALF 中"wrap-up"的具体位置
+
+ALF Green function 计算流程（`cgr1_mod.F90` 的 CGR）：
+1. **逐 τ 构造 B(τ)**
+2. **分组进行 QR 或 LU 稳定**
+3. **最后一个 wrap-up，把稳定块乘起来形成完整的 $\mathcal{B}$**
+4. 计算 $G = (1+\mathcal{B})^{-1}$
+
+#### 3.4.3 正确的 P[λ] 插入位置
+
+> **在 wrap-up 阶段构造完 B_total 后、计算 $G^{-1} = I + B_{\text{total}}$ 之前**
+
+```fortran
+! ========================================
+! 正确做法：在 wrap-up 层、构造最终 B_total 后插入
+! ========================================
+
+! wrap-up 完成后的 B_total（已经是完整的一圈传播）
+B_total = B(M) * B(M-1) * ... * B(1)
+
+! P[λ] 只乘一次，乘在左边
+B_eff = P[lambda] * B_total
+
+! 计算 Green function
+Ginv = I + B_eff
+G = inverse(Ginv)
+```
+
+#### 3.4.4 不正确做法的例子
+
+```fortran
+! ========================================
+! ❌ 错误做法 1：在 CGR 的局部 GRUP 上乘 P[λ]
+! ========================================
+! CGR 内部的 GRUP 是局部传播子，不是完整的一圈
+! 如果在这里乘 P[λ]，会导致某些时间片的 G 包含 P[λ] 两次，某些不含
+
+! ❌ 错误做法 2：在每个 stabilizer block 上乘 P[λ]
+! ========================================
+! 会导致 P[λ] 被乘了多次（有多少个 block 就乘多少次）
+
+! ❌ 错误做法 3：在 GRUP 和 GRDW 各乘一次
+! ========================================
+! 会导致 P[λ] 被乘了两次
+```
+
+#### 3.4.5 正确的实现方案（已实现）
+
+> ✅ **战略选择：把 P[λ] 吸收进最后一个时间片的 B 矩阵**
+>
+> 只要让 ALF 看到的时间片矩阵变成：
+> $$B'_M = P[\lambda] \cdot B_M, \quad B'_k = B_k\ (k < M)$$
+>
+> 则传播子变成：
+> $$\mathcal{B}' = B'_M \cdots B'_1 = P[\lambda] \cdot B_M \cdots B_1 = P[\lambda] \cdot \mathcal{B}$$
+>
+> CGR 完全不用改，而 PRX 的边界条件被严格实现。
+
+**实现位置：`wrapur_mod.F90`**
+
+在 `WRAPUR` 的时间片循环中，当 `nt == Ltrot` 时，在所有 Op_V 处理完后调用：
+```fortran
+DO NT = NTAU + 1, NTAU1
+   Call Hop_mod_mmthr(TMP,nf,nt)
+   Do n = 1,Size(Op_V,1)
+      Call Op_mmultR(Tmp,Op_V(n,nf),nsigma%f(n,nt),'n',nt)
+   ENDDO
+   ! ✅ Apply P[lambda] at time boundary (nt = Ltrot)
+   If (nt == Ltrot .and. ham%Use_Strict_Gauss()) then
+      Call ham%Apply_P_Lambda_To_B(TMP, nf)
+   Endif
+ENDDO
+```
+
+**核心函数：`Apply_P_Lambda_To_B`**
+
+```fortran
+Subroutine Apply_P_Lambda_To_B(B_slice, nf)
+    ! Left multiply P[lambda] on B-matrix: B'(i,:) = lambda_i * B(i,:)
+    Do I = 1, N_sites
+        B_slice(I, :) = lambda_field(I) * B_slice(I, :)
+        ! For two spins:
+        B_slice(I + N_sites, :) = lambda_field(I) * B_slice(I + N_sites, :)
+    Enddo
+End Subroutine
+```
+
+这样 CGR 输出的 Green function 自动满足：
+$$G = (1 + P[\lambda] \cdot \mathcal{B})^{-1}$$
+
+#### 3.4.4 两自旋自由度的处理
+
+**情况 1：两自旋独立（无自旋翻转项）**
+
+费米子矩阵是 block-diagonal：
+$$B = \begin{pmatrix} B^\uparrow & 0 \\ 0 & B^\downarrow \end{pmatrix}$$
+
+P[λ] 也必须 block-diagonal：
+$$P[\lambda] = \begin{pmatrix} P_\lambda & 0 \\ 0 & P_\lambda \end{pmatrix}$$
+
+其中 $(P_\lambda)_{ij} = \lambda_i \delta_{ij}$
+
+**情况 2：有自旋混合项（SO coupling 等）**
+
+费米子 Hilbert 空间维度是 2N，P[λ] 仍然是：
+$$P[\lambda]_{(i,\sigma),(j,\sigma')} = \lambda_i \delta_{ij} \delta_{\sigma\sigma'}$$
+
+---
+
+## 模块 4：玻色作用量
+
+### 4.1 总玻色作用量
+
+$$S_{\text{total}} = S_{\text{Z2-gauge}} + S_{\tau\text{-path}} + S_{\text{plaq-time}} + S_{\text{Gauss-}\lambda}$$
+
+### 4.2 Gauss λ 作用量
+
+$$S_{\text{Gauss-}\lambda} = -\sum_i \gamma \cdot \tau^z_{i,0} \cdot \lambda_i \cdot \tau^z_{i,M-1}$$
+
+### 4.3 对应权重
+
+$$W_{\text{Gauss}} = \prod_i e^{\gamma \cdot \tau^z_{i,0} \cdot \lambda_i \cdot \tau^z_{i,M-1}}$$
+
+---
+
+## 模块 5：蒙特卡洛更新
+
+### 🚨 关键设计决策：λ 是 site-only 变量，独立更新
+
+> **λ 不是 Field_type=5，不走逐时间片更新！**
+> 
+> λ 只有空间索引 `lambda_field(site)`，不出现在 `nsigma(i, nt)` 这类带 τ 下标的数组里。
+> λ 更新通过独立的 `Update_Lambda` 循环，只遍历 site，不遍历 τ。
+
+### 5.1 更新 λ(i)：独立的 site-only 更新
+
+翻转 $\lambda_i \to -\lambda_i$：
+
+**玻色权重比率**（PRX A6）：
+$$R_{\text{bose}}^{(\lambda)} = \exp\left(2\gamma \cdot \tau^z_{i,0} \cdot \tau^z_{i,M-1} \cdot \lambda_i^{\text{old}}\right)$$
+
+**费米子行列式比率**：
+$$R_{\text{ferm}}^{(\lambda)} = \frac{\det(1 + P[\lambda^{\text{new}}] \mathcal{B})}{\det(1 + P[\lambda^{\text{old}}] \mathcal{B})}$$
+
+**总比率**：
+$$R^{(\lambda)} = R_{\text{bose}}^{(\lambda)} \cdot R_{\text{ferm}}^{(\lambda)}$$
+
+#### 5.1.1 关键洞察：λ 翻转 = B_M 的 rank-1/rank-2 更新
+
+由于 P[λ] 被吸收进 $B_M$（见模块 3.4.5），翻转 $\lambda_i$ 的效果是：
+$$B'_M(i,:) = -B_M(i,:)$$
+
+这正好是标准 DQMC 里最适合做 Sherman–Morrison 的场景！
+
+#### 5.1.2 情况 A：↑↓ 自旋完全独立（block-diagonal）
+
+若费米子矩阵是 block-diagonal，可以对每个自旋分开做 **rank-1** 更新：
+
+**单自旋的 rank-1 公式**：
+$$R_{\text{ferm}}^\sigma = 1 - 2\lambda_i^{\text{old}} \cdot (B_M G_M)_{ii}$$
+
+其中 $G_M$ 是 **最后时间片 τ=M 的等时 Green function**。
+
+**Sherman-Morrison 更新**（单自旋）：
+
+$$G^\sigma_{\text{new}} = G^\sigma_{\text{old}} - \frac{G^\sigma_{\text{old}} \cdot u \cdot w^T \cdot G^\sigma_{\text{old}}}{R_{\text{ferm}}^\sigma}$$
+
+其中：
+- $u = (-2 \lambda_i^{\text{old}}) e_i$
+- $w^T = (B_M)_{\text{row }i}$（$B_M$ 的第 i 行）
+
+两自旋 decoupled：$R_{\text{ferm}} = R_{\text{ferm}}^\uparrow \times R_{\text{ferm}}^\downarrow$
+
+#### 5.1.3 情况 B：自旋混合（SO coupling, pair-hopping 等）
+
+翻转 λ_i 时，$B_M$ 的第 i 行和第 i+N 行都要乘 -1，这是 **rank-2** 更新。
+
+**费米子行列式比率**：
+$$R_{\text{ferm}} = \det(I_2 + V^T \cdot G_M \cdot U)$$
+
+其中：
+$$U = \begin{pmatrix} u_\uparrow & 0 \\ 0 & u_\downarrow \end{pmatrix}_{2N \times 2}, \quad
+V = \begin{pmatrix} (B_M)_{\text{row }i} \\ (B_M)_{\text{row }i+N} \end{pmatrix}^T_{2N \times 2}$$
+
+**Sherman-Morrison rank-2 更新**：
+$$G_{\text{new}} = G_M - G_M \cdot U \cdot (I_2 + V^T \cdot G_M \cdot U)^{-1} \cdot V^T \cdot G_M$$
+
+#### 5.1.4 ALF 实现：Sweep_Lambda 循环
+
+```fortran
+!> λ 更新：独立循环遍历所有 site，不遍历 τ
+!> 需要 G_M (最后时间片的等时 Green) 和 B_M (最后时间片的 B 矩阵)
+subroutine Sweep_Lambda(G_M, B_M, N_sites, N_dim)
+    complex(8), intent(inout) :: G_M(:,:)
+    complex(8), intent(in) :: B_M(:,:)
+    integer, intent(in) :: N_sites, N_dim
+    
+    integer :: i
+    real(8) :: R_bose, R_tot
+    complex(8) :: R_ferm, BG_i(N_dim)
+    integer :: tau_z_0, tau_z_M1, lambda_old
+    
+    ! 遍历所有 site（不是时间片！）
+    do i = 1, N_sites
+        ! --- 玻色权重比率 PRX A6 ---
+        tau_z_0  = Get_Tau_Z_At_Time_0(i)
+        tau_z_M1 = Get_Tau_Z_At_Time_M1(i)
+        lambda_old = lambda_field(i)
+        R_bose = exp(2.0d0 * Gamma_Gauss * tau_z_0 * tau_z_M1 * lambda_old)
+        
+        ! --- 费米子权重比率（基于 B_M 和 G_M）---
+        ! 计算 B_M * G_M 的第 i 行
+        BG_i(:) = matmul(B_M(i, :), G_M)
+        R_ferm = 1.0d0 - 2.0d0 * lambda_old * BG_i(i)
+        
+        ! Metropolis 接受/拒绝
+        R_tot = R_bose * abs(R_ferm)
+        if (ranf() < R_tot) then
+            ! 更新 lambda（site-only 变量）
+            lambda_field(i) = -lambda_old
+            ! Sherman-Morrison 更新 Green function
+            call Update_Green_SM_Lambda(G_M, i, B_M, N_dim, R_ferm)
+        endif
+    enddo
+end subroutine
+```
+
+> **关键点**：λ 更新只依赖**最后时间片**的 Green 与 B_M，不需要遍历所有 τ。
+
+### 5.2 更新 τ 自旋
+
+τ 自旋更新可能改变 $\tau^z_{i,0}$ 或 $\tau^z_{i,M-1}$，从而改变 Gauss 作用量：
+
+$$\Delta S_{\text{Gauss}} = \gamma \left[\tau^z_{i,0}^{\text{new}} \lambda_i \tau^z_{i,M-1}^{\text{new}} - \tau^z_{i,0}^{\text{old}} \lambda_i \tau^z_{i,M-1}^{\text{old}}\right]$$
+
+**玻色权重比率**：
+$$R_{\text{bose}}^{(\tau)} = e^{-\Delta S_{\text{Gauss}}}$$
+
+### 5.3 更新 σ 自旋
+
+σ 更新影响 star product，但通常不直接改变 $\tau^z_{i,0}$ 或 $\tau^z_{i,M-1}$（除非通过耦合）。
+
+如果有时空 plaquette 项，需要计算：
+$$\Delta S_{\text{plaq}} = -K_{\text{plaq}} \left[\sigma^z_{\Box}^{\text{new}} - \sigma^z_{\Box}^{\text{old}}\right]$$
+
+---
+
+## 模块 6：观测量
+
+### 6.1 关于 τ^x/σ^x 的物理解释
+
+> 🚨 **重要澄清：ALF 中存储的 Z₂ 变量 vs. Hamiltonian 中的算符**
+>
+> ALF 中实际存储的 `nsigma`, `ntau` 等变量是 **Z₂ Ising 场**（取值 ±1），对应的是 **σ^z, τ^z 的 classical representation**。
+>
+> 而 Hamiltonian 中的 **σ^x, τ^x** 是通过 **Hubbard-Stratonovich 变换** 映射到这些 Ising 场上的。
+
+#### 从路径积分到观测量的映射关系
+
+1. **MC 采样的是**：`nsigma(bond, tau)`, `ntau(site, tau)` 的配置
+2. **这些配置代表的是**：在该时空点上 σ^z, τ^z 的本征值
+3. **但在 Gauss 算符中出现的是 σ^x, τ^x**
+
+在 slave-spin/orthogonal-fermion 框架中，路径积分表示已经将量子算符映射为经典 Ising 场。因此：
+
+$$G_r = Q_r \cdot \tau_r^x \cdot \prod_{b \in +r} \sigma^x_b$$
+
+在 MC 中**直接用** `ntau(r, tau)` 和 `nsigma(b, tau)` 计算：
+
+$$G_r^{\text{MC}}(\tau) = Q_r \cdot \texttt{ntau}(r, \tau) \cdot \prod_{b \in +r} \texttt{nsigma}(b, \tau)$$
+
+这不是一个"错误"，而是 **路径积分 representation 中 classical field 就代表对应的 Pauli 算符**。
+
+### 6.2 Gauss 算符期望值
+
+$$\langle G_r \rangle = \left\langle Q_r \cdot \tau_r^x \cdot \prod_{b \in +r} \sigma^x_b \right\rangle$$
+
+在 MC 中测量：
+$$\overline{G} = \frac{1}{N_\tau N_s} \sum_{\tau, r} G_r^{\text{MC}}(\tau)$$
+
+应接近 $+1$（严格 projector 情况下）。
+
+### 6.3 Gauss 约束违反度
+
+$$\text{GaussViol} = \left\langle (G_r - Q_r)^2 \right\rangle = \frac{1}{N_\tau N_s} \sum_{\tau, r} (G_r(\tau) - Q_r)^2$$
+
+- 若 projector 完全精确且无数值误差：GaussViol ≈ 0
+- 实际上可能有极小但非零值（机器精度附近）
+
+---
+
+## 验证 Checklist
+
+### ✅ 数值自检项目
+
+#### 1. Gauss 约束数值检查
+```fortran
+! 测量 ⟨(G_r - Q_r)²⟩
+real(8) :: gauss_viol
+gauss_viol = 0.d0
+do nt = 1, Ltrot
+    do i = 1, Latt%N
+        G_r = Compute_Gauss_Operator_Int(i, nt)
+        gauss_viol = gauss_viol + (G_r - Q_background(i))**2
+    enddo
+enddo
+gauss_viol = gauss_viol / (Ltrot * Latt%N)
+! 期望值：应该在机器精度附近（< 1e-10）
+```
+
+**如果 GaussViol 随时间增大**，检查：
+- P[λ] 是否在所有时间片的 Green 中一致地出现
+- 某些 update 是否忘记乘 bosonic factor
+- stabilizer block 是否重复乘了 P[λ]
+
+#### 2. λ 边界条件检查
+```fortran
+! 测试 1：把所有 λ 固定为 +1
+lambda_field(:) = +1
+! 与不加严格 Gauss projector 的结果比较
+! 应该只在物理 sector 有差异，而不是整体崩掉
+
+! 测试 2：随机翻转几个 λ
+call random_flip_lambda(10)
+! 观测局域 τ^z 或密度
+! 看看是否出现明显 PBC/APBC 的差异
+```
+
+#### 3. Sign 检查
+```fortran
+! 在论文参数点（sign-free 区域）统计平均 sign
+complex(8) :: avg_sign
+! 如果 sign 掉得很快，检查：
+! - P[λ] 是否插错位置
+! - GaussSector / Q_r pattern 是否和原论文一致
+```
+
+### ✅ 必须确认的实现细节
+
+| 检查项 | 期望 | 危险信号 |
+|--------|------|----------|
+| P[λ] 乘的次数 | 完整一圈只乘一次 | 每个 block 乘一次/GRUP GRDW 各乘一次 |
+| λ 翻转时 B_total | 不重算 | 每次翻转都重新计算 B_total |
+| 两自旋 rank-2 | 真正用 rank-2 或分开两个 rank-1 | 偷懒当单 rank-1 用 |
+| λ 存储 | site-only `lambda_field(site)` | 带 τ 下标 `lambda(site, tau)` |
+| λ 更新循环 | 只遍历 site | 遍历 site × tau |
+
+---
 
 ## 使用方法
 
 ### 参数设置
 
-在参数文件中设置以下参数来启用严格 Gauss 约束：
-
 ```
 UseStrictGauss = .true.
+GaussSector = "even"    ! "even", "odd", "staggered"
 ```
 
-当 `UseStrictGauss = .false.`（默认值）时，代码恢复到原有的 Z₂_Matter 模型行为。
+### GaussSector 的 Q_r pattern 定义
 
-### 新增观测量
+> 🚨 **必须明确 Q_r 的具体取值！**
 
-当启用严格 Gauss 约束时，以下额外观测量会被自动添加：
+| GaussSector | Q_r 定义 | 适用场景 |
+|-------------|----------|----------|
+| `"even"` | $Q_i = +1$ 对所有 site | 标准物理 sector |
+| `"odd"` | $Q_i = -1$ 对所有 site | 全局奇 sector |
+| `"staggered"` | $Q_{x,y} = (-1)^{x+y}$ | A/B 子格交替 |
 
-1. **Gauss**: Gauss 算符的期望值 $\langle G_r \rangle$
-   - 如果 Gauss 约束被严格满足，此值应该接近 1
+#### Q_r pattern 的明确公式（Square lattice）
 
-2. **GaussViol**: Gauss 约束违反 $\langle (G_r - 1)^2 \rangle$
-   - 如果 Gauss 约束被严格满足，此值应该接近 0
+假设 site index 按行优先排列：
+$$i = x + (y - 1) \cdot L_x, \quad x \in [1, L_x], \; y \in [1, L_y]$$
 
-## 实现细节
+则：
+- **even**：$Q_i = +1$
+- **odd**：$Q_i = -1$
+- **staggered**（棋盘形）：
+  $$Q_i = (-1)^{x + y}$$
+  其中 $(x, y) = (\text{mod}(i-1, L_x) + 1, \; (i-1) / L_x + 1)$
 
-### 1. 新增场变量
-
-在 `Hamiltonian_Z2_Matter_smod.F90` 中添加了以下存储：
+#### ALF 实现
 
 ```fortran
-! Lambda 场数组：lambda_field(site, tau) = +1 或 -1
-Integer, allocatable :: lambda_field(:,:)
-
-! Star product 缓存
-Integer, allocatable :: star_product_cache(:,:)
+subroutine Setup_Q_Background(Latt, GaussSector)
+    type(Lattice_type), intent(in) :: Latt
+    character(len=*), intent(in) :: GaussSector
+    integer :: i, x, y, Lx, Ly
+    
+    Lx = Latt%L1
+    Ly = Latt%L2
+    
+    select case (trim(GaussSector))
+    case ("even")
+        Q_background(:) = +1
+        
+    case ("odd")
+        Q_background(:) = -1
+        
+    case ("staggered")
+        do i = 1, Latt%N
+            x = mod(i - 1, Lx) + 1
+            y = (i - 1) / Lx + 1
+            Q_background(i) = (-1)**(x + y)
+        enddo
+        
+    case default
+        Q_background(:) = +1
+    end select
+end subroutine
 ```
 
-### 2. 场类型
-
-Lambda 场被添加为第 5 种场类型（Field_type = 5）：
-- Field_type = 1: Z₂ 规范场
-- Field_type = 2: Bond matter 场
-- Field_type = 3: Hubbard HS 场
-- Field_type = 4: Site matter 场
-- **Field_type = 5: Gauss lambda 场** (新增)
-
-### 3. 核心函数
-
-#### `Compute_Star_Product_X(I, nt)`
-计算 star product $X_r(\tau) = \prod_{b\in +r} \sigma^x_b(\tau)$
-
-#### `Compute_Gauss_Operator(I, nt, GRC)`
-计算 Gauss 算符 $G_r = (-1)^{n_r} \cdot X_r$
-
-#### `Compute_Gauss_Phase(I, nt)`
-计算 Gauss 相位因子 $\exp(i \lambda_r \pi/2 \cdot X_r)$
-
-### 4. 蒙特卡洛更新
-
-Lambda 场通过标准的顺序更新（sequential updates）进行采样，与其他 Ising 场相同。更新范围在 `Overide_global_tau_sampling_parameters` 中设置。
-
-### 5. 传播子修改
-
-Gauss 相位因子作为对角的一体算符插入到传播子 $B(\tau)$ 中：
-
-$$B(\tau) = e^{-\Delta\tau K}\, e^{-\Delta\tau V(\sigma(\tau))}\, B^{(\text{Gauss})}(\tau)$$
-
-其中：
-$$B^{(\text{Gauss})}(\tau) = \prod_r \exp\left[ i\lambda_r(\tau)\frac{\pi}{2} X_r(\tau)\right]$$
-
-## 与文献的对应关系
-
-本实现与以下文献中的方法保持一致：
-- Nat. Phys. 2017: Gazit et al.
-- PNAS 2018: 相关工作
-- PRX 2020: Assaad 等
-
-## 验证方法
-
-### 1. 检查 Gauss 约束满足程度
-
-运行模拟后，检查输出文件：
-- `Gauss_scal.dat`: 应该接近 1
-- `GaussViol_scal.dat`: 应该接近 0
-
-### 2. 对比测试
-
-建议进行以下对比：
-1. `UseStrictGauss = .false.` (原有实现)
-2. `UseStrictGauss = .true.` (严格 Gauss 约束)
-
-比较两种情况下的：
-- 相图结构
-- 临界指数
-- 费米面结构
-
-## 注意事项
-
-1. **数值稳定性**: 新的相位因子可能在某些参数区域影响数值稳定性，建议从较小的系统开始测试。
-
-2. **符号问题**: 在论文参数下应该是 sign-free，但建议在新参数区域进行验证。
-
-3. **性能**: Lambda 场的更新会增加计算量，但与原有 Ising 场更新的开销相当。
-
-## 示例参数文件
+### 示例参数文件
 
 ```
 Model = Z2_Matter
@@ -133,16 +611,453 @@ Ham_g = 1.0
 Beta = 10.0
 Dtau = 0.1
 UseStrictGauss = .true.
+GaussSector = "even"
 ```
+
+---
+
+## 实现细节
+
+### 新增场变量
+
+```fortran
+! Lambda 场：τ-independent，只有空间索引
+Integer, allocatable :: lambda_field(:)  ! lambda_field(site) = +1 或 -1
+
+! tau^z 场（已存在，需要访问首尾）
+! tau_z(site, tau=0) 和 tau_z(site, tau=M-1)
+
+! 背景电荷数组
+Integer, allocatable :: Q_background(:)
+
+! Gauss 耦合常数
+Real (Kind=Kind(0.d0)) :: Gamma_Gauss  ! γ = -0.5 * ln(tanh(ε*h))
+```
+
+### 核心函数
+
+| 函数名 | 功能 | 公式 |
+|--------|------|------|
+| `Setup_Gauss_constraint()` | 初始化 λ 场和计算 γ | $\gamma = -\frac{1}{2}\ln[\tanh(\epsilon h)]$ |
+| `Get_Tau_Z_At_Time_0(I)` | 获取 τ=0 处的 τ^z | $\tau^z_{i,0}$ |
+| `Get_Tau_Z_At_Time_M1(I)` | 获取 τ=M-1 处的 τ^z | $\tau^z_{i,M-1}$ |
+| `Compute_Gauss_Action_PRX(I)` | 计算单点 Gauss 作用量 | $S_i = -\gamma \tau^z_{i,0} \lambda_i \tau^z_{i,M-1}$ |
+| `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` | λ 翻转的权重比 | $R = e^{2\gamma \tau^z_{i,0} \tau^z_{i,M-1} \lambda_i^{\text{old}}}$ |
+| `Compute_Delta_S_Gauss_Tau_Update(...)` | τ 更新的 ΔS | $\Delta S = S^{\text{new}} - S^{\text{old}}$ |
+| `Compute_Gauss_Operator(I, nt, GRC)` | 计算 Gauss 算符（观测量） | $G_r = Q_r \tau_r^x X_r$（无 $(-1)^{n_f}$） |
+
+### 费米子行列式修正
+
+```fortran
+! 计算完整传播子
+Btotal = B(M) * B(M-1) * ... * B(1)
+
+! 构造 P[λ] 对角矩阵
+P_lambda(i,i) = lambda_field(i)
+
+! 修正后的 Green 函数逆
+Ginv = I + P_lambda * Btotal
+
+! 行列式
+detM = det(Ginv)
+```
+
+---
+
+## 与文献的对应关系
+
+| 本文档内容 | 对应 PRX 公式 |
+|------------|---------------|
+| λ 是 τ-independent | Appendix A 整体结构 |
+| $W_i = e^{\gamma \tau^z_0 \lambda \tau^z_{M-1}}$ | (A6) |
+| $\gamma = -\frac{1}{2}\ln[\tanh(\epsilon h)]$ | (A6) |
+| $\det(1 + P[\lambda]\mathcal{B})$ | A6 后段 |
+| 时空 plaquette | A6 后 "spatiotemporal plaquette" |
+
+---
 
 ## 文件修改列表
 
-主要修改的文件：
-- `Prog/Hamiltonians/Hamiltonian_Z2_Matter_smod.F90`
-  - 添加 `UseStrictGauss` 参数
-  - 添加 `lambda_field` 存储
-  - 添加辅助函数
-  - 修改 `Ham_V`、`S0`、`Hamiltonian_set_nsigma` 等
+### 已完成的修改
+
+#### 1. `Prog/Hamiltonians/Hamiltonian_Z2_Matter_smod.F90`
+
+**变量声明**：
+- `lambda_field(:)` - τ-independent λ 场（一维数组）
+- `Q_background(:)` - 背景电荷数组
+- `Gamma_Gauss` - PRX A6 耦合常数 $\gamma = -\frac{1}{2}\ln[\tanh(\epsilon h)]$
+
+**新增函数**：
+| 函数名 | 功能 |
+|--------|------|
+| `Setup_Gauss_constraint()` | 初始化 λ 场和计算 γ |
+| `Get_Tau_Z_At_Time_0(I)` | 获取 τ=0 处的 τ^z |
+| `Get_Tau_Z_At_Time_M1(I)` | 获取 τ=M-1 处的 τ^z |
+| `Compute_Gauss_Action_PRX(I)` | 计算单点 Gauss 作用量 |
+| `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` | λ 翻转的玻色权重比 |
+| `Compute_Delta_S_Gauss_Tau_Update(...)` | τ 更新的 ΔS_Gauss |
+| `Compute_Star_Product_X(I, nt)` | 计算 star product $X_r$ |
+| `Compute_Gauss_Operator_Int(I, nt)` | 计算 Gauss 算符（整数） |
+| `Construct_P_Lambda_Matrix(P, N)` | 构造对角矩阵 $P[\lambda]$ |
+| `Apply_P_Lambda_To_Matrix(B, N)` | 应用 $P[\lambda]$ 到矩阵 $B$ |
+| `Compute_Lambda_Flip_Fermion_Ratio(I, G, B, N)` | Sherman-Morrison 费米子行列式比率 |
+| `Update_Green_Sherman_Morrison_Lambda(G, I, B, N, R)` | Sherman-Morrison 更新 Green 函数 |
+| `Compute_Lambda_Flip_Total_Ratio(I, G, B, N)` | λ 翻转总接受率 (bose + fermion) |
+
+**修改的函数**：
+- `Compute_Gauss_Operator` - 去除 $(-1)^{n_f}$（PRX orthogonal-fermion 构造）
+- `Setup_Gauss_constraint` - 初始化 τ-independent λ 场
+- `S0` - λ 更新使用 PRX A6 公式
+- `Global_move_tau` - 添加 τ 更新的 Gauss 权重
+- `Hamiltonian_set_nsigma` - 正确初始化 τ-independent λ
+
+#### 2. `Documentation/Z2_Strict_Gauss_Constraint.md`
+
+- 添加 S_τ-path 路径积分项说明（模块 0.3）
+- 添加时空 plaquette 完整定义（模块 2）
+- 添加 P[λ] wrap-up 插入机制说明（模块 3.4）
+- 添加 Sherman-Morrison 更新说明（模块 5.1.1-5.1.3）
+
+### 实现状态
+
+#### ✅ 完整的 PRX A6 实现（当前版本）
+
+1. **P[λ] 在 B 矩阵层实现** ✅
+   - **位置**：`wrapur_mod.F90` 在 `nt == Ltrot` 时调用 `ham%Apply_P_Lambda_To_B`
+   - **函数**：`Hamiltonian_Z2_Matter_smod.F90` 中的 `Apply_P_Lambda_To_B`
+   - **效果**：$B'_M = P[\lambda] \cdot B_M$，从而 $G = (1 + P[\lambda] \cdot \mathcal{B})^{-1}$
+   - **注意**：`B_lambda_slice` 仍会被保存（供调试），但 λ 更新**不再使用它**
+
+2. **λ 更新的 Sherman-Morrison 机制** ✅ （🔥 **重大简化**）
+   
+   **关键洞察**：由于 $B \cdot G = 1 - G$（因为 $G = (1+B)^{-1}$），我们有：
+   $$(B \cdot G)_{ii} = 1 - G_{ii}$$
+   
+   因此：
+   $$R_{\text{ferm}}^\sigma = 1 - 2 \cdot (B \cdot G)_{ii} = 1 - 2(1 - G_{ii}) = 2G_{ii} - 1$$
+   
+   - **Lambda_Ferm_Ratio_site**：**只需要 G，不需要 `B_lambda_slice`！**
+     - 单自旋：$R_{\text{ferm}} = 2 G_{ii} - 1$
+     - 两自旋解耦：$R_{\text{ferm}} = (2 G_{ii}^{\uparrow} - 1) \times (2 G_{i+N,i+N}^{\downarrow} - 1)$
+   
+   - **Lambda_Update_Green_site**：**只需要 G，不需要 `B_lambda_slice`！**
+     $$G'_{jk} = G_{jk} + \frac{2 \cdot G_{ji} \cdot (\delta_{ik} - G_{ik})}{R_\sigma}$$
+     等价于：$G' = G + 2 \cdot G[:,i] \otimes (e_i - G[i,:]) / R_\sigma$
+   
+   这个简化**完全消除**了对 `B_lambda_slice` 的依赖，也消除了"时间片一致性"的潜在问题！
+
+3. **独立的 Sweep_Lambda 循环** ✅
+   - **位置**：`main.F90` 在 CGR 计算后、TAU_M 之前调用
+   - **函数**：`ham%Sweep_Lambda(GR(:,:,nf))`
+   - 只遍历 site（不遍历 τ），Metropolis 接受 + SM 更新
+   - **注意**：由于简化公式只依赖 G，不需要同步更新 `B_lambda_slice`
+   
+   **spinful 情况**：对每个 site 的一次 λ 翻转，需要用上面公式连续两次更新 G：
+   - 第一次：针对 index `i_site`（上自旋）
+   - 第二次：针对 index `i_site + N_sites`（下自旋）
+
+4. **PRX A6 玻色权重** ✅
+   - `Compute_Gauss_Weight_Ratio_Lambda_PRX(I)` - 计算 $e^{-2\gamma \tau^z_0 \tau^z_{M-1} \lambda_{\text{old}}}$
+   - 🚨 注意：是**负号** `-2γ`，不是 `+2γ`！
+   - 包含数值稳定性处理：指数截断避免溢出
+
+5. **符号/相位处理** ✅
+   - `Sweep_Lambda(G, Phase)` 接受可选的 `Phase` 参数
+   - 使用 `|R_tot|` 做 Metropolis 判断
+   - 符号累积到全局 `Phase`：`Phase = Phase * R_tot / |R_tot|`
+
+6. **GaussViol 诊断** ✅
+   - `ham%GaussViol_Diagnostic(sweep_number)` - 实时检查 Gauss 约束
+
+#### ⚠️ 已废弃的旧实现（请勿使用）
+
+以下方法已被删除或修正，**不要**使用旧版本：
+
+- ~~`Apply_P_Lambda_To_Green(GR, nf_eff)`~~：错误地在 CGR 中应用 $G' = P[\lambda] \cdot G$
+- ~~在 `cgr1_mod.F90` 中调用 `ham%Apply_P_Lambda_To_Green`~~：这会导致 P[λ] 被乘两次
+- ~~旧的 `Compute_Gauss_Weight_Ratio(lambda_old, lambda_new, G_r_old, G_r_new)`~~：
+  - 这是逐时间片的软约束公式 `(1+λ)(1+λG)/4`
+  - **与 PRX A6 不兼容！**
+  - 已从 `S0` 和 `Global_move_tau` 中移除
+
+**正确做法**：
+- P[λ] 只在 `wrapur_mod.F90` 的 `nt == Ltrot` 时通过 `Apply_P_Lambda_To_B` 乘一次
+- Gauss 权重只在**时间边界**（nt=1 或 nt=Ltrot）变化时才需要计算
+
+#### 🔴 已修复的严重 bug
+
+1. **λ 翻转玻色权重符号错误**
+   - 错误：`exp(+2γ * τ_z_0 * τ_z_{M-1} * λ_old)`
+   - 正确：`exp(-2γ * τ_z_0 * τ_z_{M-1} * λ_old)`
+   
+2. **sigma/tau 更新使用了错误的 Gauss 公式**
+   - `S0` 函数中的 sigma 更新：已移除旧的软约束代码
+   - `Global_move_tau` 中的 tau 更新：已改为 PRX A6 时间边界公式
+   
+3. **符号处理**
+   - `Sweep_Lambda` 现在正确累积符号到 `Phase`
+   - 不再使用 `abs(R_ferm)` 丢弃符号
+
+4. **`Compute_Gauss_Weight` 函数未定义引用**（编译期发现）
+   - 错误：调用了不存在的 `DW_Gauss_weight(lambda_val, G_r)`
+   - 修复：替换为直接计算公式 `0.25d0 * dble(1 + lambda_val) * dble(1 + lambda_val * G_r)`
+   - 对应公式：$W_r = \frac{1}{4}(1 + \lambda)(1 + \lambda G_r)$
+
+5. **`Compute_Gauss_Operator` 的物理定义**
+   - PRX orthogonal-fermion/slave-spin 构造：$(-1)^{n_f}$ 被**吸收**到 τ 结构中
+   - 正确公式：$G_r = Q_r \cdot \tau_r^x \cdot \prod_b \sigma_b^x$（**无** $(-1)^{n_f}$）
+   - 这是保证 sign-free 的关键！
+
+6. **SU(N) 对称性下 Green 函数维度问题**
+   - 发现：ALF 中 GR 维度是 `Ndim x Ndim`（不包含自旋），不是 `2*Ndim x 2*Ndim`
+   - 修复：`Lambda_Ferm_Ratio_site` 改为 `R_ferm = (2*G(i,i) - 1)^N_SUN`
+   - 修复：`Lambda_Update_Green_site` 改为只做一次 rank-1 更新
+
+7. **λ 翻转后 Green 函数更新**
+   - 正确做法：使用 Sherman-Morrison 更新 G，**不要**在 `Sweep_Lambda` 后立即调用 CGR
+   - CGR 只在正常的 re-stabilization 周期调用
+   - SM 更新分母使用 `R_single = 2*G(i,i) - 1`，**不是** `R_ferm = R_single^N_SUN`
+
+#### 🔴 已识别的核心问题
+
+1. **σ 更新没有被 Gauss 约束约束**
+   - PRX 的 projector 要求：G_r = Q_r τ^x X_r = +1
+   - 当 σ 翻转时，X_r = Π σ^x 改变，可能导致 G_r 从 +1 变为 -1
+   - **当前实现中，σ 更新完全没有 Gauss 权重检查**
+   - 这是导致 `<G_r> ≈ 0` 而不是 `+1` 的根本原因
+
+2. **半满填充时 R_ferm = 0 导致 λ 动态性差**
+   - 当 `G(i,i) ≈ 0.5` 时，`R_single = 1 - 2*λ_old*(1-G_{ii}) ≈ 0`
+   - λ 难以翻转，但使用 `Ham_chem > 0` 可以改善
+
+3. **Sherman-Morrison 更新在当前实现中不稳定**
+   - 当 λ 翻转后，G 需要更新
+   - 当前 SM 公式可能有问题，导致 G 数值不稳定
+   - 临时解决方案：在 Sweep_Lambda 后调用 CGR 重建 G（效率低）
+
+#### 🔵 可能的解决方案（待实现）
+
+1. **添加 σ 更新的 Gauss 权重**
+   - 计算 σ 翻转前后的 G_r 值
+   - 如果 G_r 从 +1 变为 -1，设置权重为 0（拒绝该更新）
+   - 这需要修改 `S0` 函数中的 `Field_type == 1` 分支
+
+2. **修正 Sherman-Morrison 公式**
+   - 仔细验证 SM 更新公式
+   - 或者实现每次 λ 翻转后立即重建 G（效率低但正确）
+
+3. **使用精确 λ 求和（小系统）**
+   - 对于 2^N 个 λ 配置精确求和
+   - 只适用于非常小的系统
+
+#### 🟡 中优先级
+
+- **时空 plaquette 项 S_plaq**（如需要 3D gauge action）
+  - 添加 $K_{\text{plaq}} = \frac{1}{2}\ln[\coth(\epsilon g)]$
+
+#### 🟢 低优先级
+
+- **GaussSector odd/staggered 测试**
+
+---
+
+## 注意事项
+
+1. **λ 不是逐 τ 的**：这是最关键的点。λ 只有空间索引。
+
+2. **费米子边界条件**：λ 通过修改时间边界条件（PBC/APBC）影响费米子行列式，不是逐 τ 乘对角矩阵。
+
+3. **γ 的计算**：需要 $h > 0$ 才能定义 γ。当 $h \to 0$ 时，$\gamma \to \infty$。
+
+4. **初始化**：初始配置应满足 Gauss 约束。
+
+5. **时空 plaquette**：如果模型包含 gauge 场动力学，需要添加时空 plaquette 项。
+
+---
+
+## 验证 Checklist
+
+### 🔍 数值诊断
+
+#### 1. Gauss 约束检查
+
+测量 $\langle (G_r - Q_r)^2 \rangle$，应该在机器精度附近：
+
+```fortran
+! 调用诊断函数（在 Hamiltonian_Z2_Matter_smod.F90 中）
+Call ham%GaussViol_Diagnostic(sweep_number)
+```
+
+- **正确实现**：GaussViol ~ $10^{-12}$ 到 $10^{-10}$
+- **有问题**：GaussViol > $10^{-6}$
+
+#### 2. λ 边界条件检查
+
+把所有 λ 固定为 +1，与"不加严格 Gauss projector"的结果比较：
+- 应该只在物理 sector 有差异，不应整体崩溃
+
+#### 3. Sign 检查
+
+在 sign-free 参数点（参考 PRX 论文）：
+- 如果平均 sign 掉得很快（L=4 时 <0.5），检查：
+  - P[λ] 是否多插了几次
+  - λ 翻转的 ferm ratio / SM 更新是否保持 det 符号一致
+
+### 🔧 实现要点
+
+#### 1. Sherman-Morrison 公式（简化版）
+
+**关键简化**：由于 $B \cdot G = 1 - G$，公式完全不需要 `B_lambda_slice`！
+
+```fortran
+! 费米子行列式比率：只需要 G
+R_ferm = 2.d0 * G(i_site, i_site) - 1.d0
+
+! Green function 更新：只需要 G
+! G' = G + 2 * G[:,i] ⊗ (e_i - G[i,:]) / R
+Do J = 1, N
+   delta_row(J) = -G(i_site, J)
+Enddo
+delta_row(i_site) = delta_row(i_site) + 1.d0
+
+coeff = 2.d0 / R_ferm
+Do J = 1, N
+   Do I = 1, N
+      G(I, J) = G(I, J) + coeff * G(I, i_site) * delta_row(J)
+   Enddo
+Enddo
+```
+
+**注意**：`B_lambda_slice` 仍然在 `Apply_P_Lambda_To_B` 中保存，但不再用于 λ 更新计算。
+
+#### 2. Sweep_Lambda 调用位置
+
+**关键**：只能在完整 CGR/WRAPUR 之后调用：
+
+```fortran
+do sweep = 1, N_sweeps
+    ! (1) 局部更新 τ、σ
+    call Sweep_tau(...)
+    call Sweep_sigma(...)
+
+    ! (2) 全局 wrap（CGR + WRAPUR）
+    call CGR(...)  ! 内部调用 WRAPUR，更新 B_lambda_slice
+
+    ! (3) λ-sweep 紧随 wrap 之后
+    if (ham%Use_Strict_Gauss()) then
+        call ham%Sweep_Lambda(GR)
+    end if
+
+    ! (4) 测量
+    call Measure(...)
+end do
+```
+
+#### 3. τ 索引约定（🔴 高优先级验证项）
+
+ALF 离散化约定：
+- `nt = 1` → $\tau = 0^+$（边界开始）
+- `nt = Ltrot` → $\tau = \beta^-$（边界结束）
+
+PRX A6 边界耦合：
+- `tau_z(i, 0)` → `Hamiltonian_set_Z2_matter(Isigma, 1)`
+- `tau_z(i, M-1)` → `Hamiltonian_set_Z2_matter(Isigma, Ltrot)`
+
+**验证测试建议**：
+1. 关闭所有其他相互作用，只保留 τ 横场 + Gauss 项
+2. 使用小系统：Lx=Ly=2, Ltrot=4
+3. 检查 $\langle \tau^z_0 \cdot \tau^z_{M-1} \rangle$：
+   - 大 $h$（强横场）时：应该强烈偏向"相同"（两者同号）
+   - 这对应 PBC/APBC 的明显区分
+4. 如果这个相关函数行为异常，说明索引搞错了
+
+### 📊 GaussViol 诊断输出示例
+
+```
+============================================================
+ GAUSS CONSTRAINT DIAGNOSTIC - Sweep      100
+============================================================
+   <G_r>         (should be ~1): 0.10000000E+01
+   GaussViol     (should be ~0): 0.12345678E-11
+   Lambda_BC_sum (PRX A6 check): 0.50000000E+00
+   Gamma_Gauss:                    1.234567
+------------------------------------------------------------
+============================================================
+```
+
+如果看到警告：
+```
+ *** WARNING: GaussViol > 1e-6 ***
+ This indicates the strict Gauss constraint may not be working!
+```
+
+检查：
+1. P[λ] 是否在 `wrapur_mod.F90` 的 `nt == Ltrot` 时正确应用
+2. τ 索引是否正确：`nt=1` → τ=0，`nt=Ltrot` → τ=M-1
+3. 所有更新是否包含 Gauss 权重比率
+
+---
+
+## ⚠️ 数值稳定性与符号处理
+
+### γ 参数的数值稳定性
+
+γ 的定义：
+$$\gamma = -\frac{1}{2}\ln[\tanh(\epsilon h)]$$
+
+当 $h \to 0$ 或 $\epsilon \to 0$ 时：
+- $\tanh(\epsilon h) \sim \epsilon h$
+- $\gamma \sim -\frac{1}{2}\ln(\epsilon h) \to +\infty$
+- 玻色权重 $e^{\gamma \tau^z_0 \lambda \tau^z_{M-1}}$ 可能溢出/下溢
+
+**实现的处理方式**：
+
+1. **小 $\epsilon h$ 渐近展开**：当 $\epsilon h < 0.01$ 时使用
+   $$\gamma \approx -\frac{1}{2}\ln(\epsilon h) + \frac{(\epsilon h)^2}{6}$$
+
+2. **最大值截断**：设置 `Gamma_max = 100`
+   - 当计算的 $\gamma > \text{Gamma\_max}$ 时，使用 `Gamma_max`
+   - 这保证了 $e^{2\gamma}$ 不会溢出
+
+3. **极限行为**：当 $h \to 0$ 时使用 `Gamma_max`
+   - 物理意义：严格投影，只保留满足 $\tau^z_0 \cdot \lambda \cdot \tau^z_{M-1} = +1$ 的配置
+
+4. **指数截断**：在 `Compute_Gauss_Weight_Ratio_Lambda_PRX` 中
+   - 指数参数 $> 200$：返回 `exp(200)`（非常大，翻转一定被接受）
+   - 指数参数 $< -200$：返回 `0`（翻转一定被拒绝）
+
+### λ 翻转权重公式的符号
+
+🚨 **重要**：λ 翻转的玻色权重比是：
+$$R_{\text{bose}} = \frac{W_{\text{new}}}{W_{\text{old}}} = e^{-2\gamma \cdot \tau^z_0 \cdot \tau^z_{M-1} \cdot \lambda_{\text{old}}}$$
+
+**注意负号！** 不是 $e^{+2\gamma \cdots}$。
+
+物理解释：
+- 如果当前配置"好"（$\tau^z_0 \cdot \lambda_{\text{old}} \cdot \tau^z_{M-1} = +1$）：
+  - $R = e^{-2\gamma} < 1$，翻转被拒绝（保持好配置）
+- 如果当前配置"坏"（$\tau^z_0 \cdot \lambda_{\text{old}} \cdot \tau^z_{M-1} = -1$）：
+  - $R = e^{+2\gamma} > 1$，翻转被接受（移动到好配置）
+
+### 符号/相位累积
+
+🚨 **重要**：程序支持有符号问题的模型！
+
+Sweep_Lambda 中的符号处理遵循 ALF 约定：
+```fortran
+! 使用 |R_tot| 做 Metropolis 接受判断
+Weight = abs(R_tot)
+if (rand < Weight) then
+   ! 接受翻转，累积符号到 Phase
+   Phase_ratio = R_tot / cmplx(Weight, 0.d0, kind(0.d0))
+   Phase = Phase * Phase_ratio
+   ...
+endif
+```
+
+符号被正确累积到全局 `Phase` 变量中，确保最终观测量正确考虑符号问题。
+
+---
 
 ## 作者
 

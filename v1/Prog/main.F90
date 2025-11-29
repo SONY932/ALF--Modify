@@ -1006,11 +1006,46 @@ Program Main
                     else
                        CALL udvst(NST, nf_eff)%reset('l')
                     endif
-                 enddo
-                 
-                 IF ( LTAU == 1 .and. .not. Projector ) then
-                    Call TAU_M( udvst, GR, PHASE, NSTM, NWRAP, STAB_NT, LOBS_ST, LOBS_EN )
-                 endif
+                enddo
+                
+                ! ================================================================
+                ! Sweep over lambda fields for strict Gauss constraint
+                ! (PRX 10.041057 Appendix A)
+                ! ================================================================
+                ! IMPORTANT: This MUST be done:
+                !   (1) AFTER full wrap-up (CGR/WRAPUR) when GR and B_lambda_slice
+                !       are synchronized with the current sigma/tau configuration
+                !   (2) BEFORE any further sigma/tau local updates (TAU_M)
+                ! The lambda sweep is site-only (tau-independent) and uses
+                ! Sherman-Morrison to update GR. B_lambda_slice is also updated
+                ! synchronously when a lambda flip is accepted.
+                ! ================================================================
+               If (ham%Use_Strict_Gauss()) then
+                  Do nf_eff = 1, N_FL_eff
+                     nf = Calc_Fl_map(nf_eff)
+                     ! Pass Phase to accumulate sign correctly
+                     Call ham%Sweep_Lambda(GR(:,:,nf), Phase)
+                  Enddo
+                  ! Rebuild G with new lambda configuration using CGR
+                  ! NOTE: SM update in Sweep_Lambda is disabled due to numerical issues
+                  ! CGR ensures numerical stability at the cost of performance
+                  Phase_array = cmplx(1.d0, 0.d0, kind(0.D0))
+                  Do nf_eff = 1, N_FL_eff
+                     nf = Calc_Fl_map(nf_eff)
+                     NVAR = 1
+                     CALL CGR(Z1, NVAR, GR(:,:,nf), UDVR(nf_eff), UDVL(nf_eff))
+                     call Op_phase(Z1,OP_V,Nsigma,nf)
+                     Phase_array(nf)=Z1
+                  Enddo
+                  if (reconstruction_needed) call ham%weight_reconstruction(Phase_array)
+                  Z=product(Phase_array)
+                  Z=Z**N_SUN
+                  Phase = Z
+               Endif
+                
+                IF ( LTAU == 1 .and. .not. Projector ) then
+                   Call TAU_M( udvst, GR, PHASE, NSTM, NWRAP, STAB_NT, LOBS_ST, LOBS_EN )
+                endif
               endif
 
            ENDDO

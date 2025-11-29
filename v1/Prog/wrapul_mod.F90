@@ -87,6 +87,8 @@ module wrapul_mod
               !CALL MMULT( TMP1,Tmp,Exp_T(:,:,nf) )
               Call  Hop_mod_mmthl (Tmp,nf,nt)
               ! Tmp = Tmp1
+              ! P[lambda] is NOT applied in wrapul to avoid double-counting.
+              ! The P modification is only in wrapur (left multiply at nt=Ltrot).
            ENDDO
            
            !Carry out U,D,V decomposition.
@@ -122,6 +124,7 @@ module wrapul_mod
                  Call Op_mmultR(udvl(nf_eff)%U,Op_V(n,nf),nsigma%f(n,nt),'c',nt)
               enddo
               Call  Hop_mod_mmthlc (udvl(nf_eff)%U,nf,nt)
+              ! P[lambda] is NOT applied in wrapul (STAB0 branch).
            ENDDO
            
            !Carry out U,D,V decomposition.

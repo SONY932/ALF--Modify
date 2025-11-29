@@ -1,0 +1,45 @@
+&VAR_ham_name
+ham_name = "Z2_Matter"
+/
+
+&VAR_lattice
+L1           = 4
+L2           = 4
+Lattice_type = "Square"
+Model        = "Z2_Matter"
+/
+
+&VAR_Model_Generic
+Checkerboard = .T.
+Symm         = .T.
+N_SUN        = 1
+N_FL         = 2
+Dtau         = 0.05d0
+Beta         = 2.d0
+Projector    = .F.
+/
+
+&VAR_QMC
+Nwrap                = 5
+NSweep               = 100
+NBin                 = 10
+CPU_MAX              = 0.0
+/
+
+&VAR_errors
+n_skip  = 1
+N_rebin = 1
+/
+
+&VAR_Z2_Matter
+ham_T          = 1.0
+ham_TZ2        = 0.5
+ham_chem       = 0.1
+ham_U          = 0.0
+Ham_J          = 0.0
+Ham_K          = 0.5
+Ham_h          = 0.2
+Ham_g          = 0.0
+UseStrictGauss = .T.
+GaussSector    = "even"
+/
