@@ -624,16 +624,45 @@
                 ! In PRX A6 framework, sigma flip changes X_r = Π σ_b^x.
                 ! This affects Gauss operator G_r = Q_r * τ_r^x * X_r.
                 ! 
-                ! STRICT ENFORCEMENT: If the sigma flip causes G_r to become -1
-                ! at the affected sites, we should reject it (weight → 0).
-                ! This is a direct implementation of the Gauss projector.
+                ! STRICT ENFORCEMENT: Use Gauss weight ratio
+                ! W_r = (1/4)(1 + λ)(1 + λ G_r)
+                ! If G_r changes from +1 to -1, the weight becomes 0 (for λ=+1)
                 ! ================================================================
                 If (UseStrictGauss) then
-                   ! Sigma flip affects X_r at the two endpoints of the link
-                   ! Check if G_r changes from +1 to -1 at either site
-                   ! For now, use a soft constraint: multiply by Gauss weight
-                   ! The weight structure depends on the model details
-                   ! TODO: Implement proper Gauss weight for sigma updates
+                   ! Link n connects two sites: I1 (from Field_list_inv) and I2
+                   ! Both sites' X_r (star product) will change when sigma flips
+                   ! I1 is already defined above from Field_list_inv(n,1)
+                   ! I2 is the neighbor in the link direction
+                   n_orientation = Field_list_inv(n,2)
+                   If (n_orientation == 1) then
+                      I2 = Latt%nnlist(I1, 1, 0)  ! +x direction
+                   else
+                      I2 = Latt%nnlist(I1, 0, 1)  ! +y direction
+                   endif
+                   
+                   ! Compute Gauss operators at both sites BEFORE sigma flip
+                   G_r_old = Compute_Gauss_Operator_Int(I1, nt)
+                   G_r_new = Compute_Gauss_Operator_Int(I2, nt)
+                   
+                   ! After sigma flip, X_r at both sites changes sign (sigma enters star once)
+                   ! So G_r_new(site) = -G_r_old(site)
+                   ! Weight ratio = W_new / W_old for both sites
+                   ! Using W = (1/4)(1+λ)(1+λG)
+                   ! R = [W(λ,G_new1)*W(λ,G_new2)] / [W(λ,G_old1)*W(λ,G_old2)]
+                   !   = [W(λ,-G_old1)*W(λ,-G_old2)] / [W(λ,G_old1)*W(λ,G_old2)]
+                   
+                   R_Gauss = 1.d0
+                   lambda_old = lambda_field(I1)
+                   ! For site I1: G changes from G_r_old to -G_r_old
+                   R_Gauss = R_Gauss * Compute_Gauss_Weight(lambda_old, -G_r_old) / &
+                        max(Compute_Gauss_Weight(lambda_old, G_r_old), 1.d-30)
+                   
+                   lambda_new = lambda_field(I2)
+                   ! For site I2: G changes from G_r_new (before flip) to -G_r_new
+                   R_Gauss = R_Gauss * Compute_Gauss_Weight(lambda_new, -G_r_new) / &
+                        max(Compute_Gauss_Weight(lambda_new, G_r_new), 1.d-30)
+                   
+                   S0 = S0 * R_Gauss
                 endif
                 
              else
@@ -2151,25 +2180,31 @@
         Subroutine Lambda_Ferm_Ratio_site(i_site, G, R_ferm)
           !
           ! ============================================================
-          ! CORRECT FORMULA including lambda_old factor!
+          ! FERMION DETERMINANT RATIO for lambda flip at site i
           ! ============================================================
           ! From G = (1 + P_old * B)^{-1}, we have:
+          !   G * (1 + P_old * B) = I
           !   G + G * P_old * B = I
-          ! So:
-          !   P_old * B * G = I - G  (since P_old^{-1} = P_old for ±1 diagonal)
-          !   B * G = P_old * (I - G)
+          !   G * P_old * B = I - G
+          !   B * G = P_old^{-1} * (I - G) = P_old * (I - G)  (since P^{-1} = P)
           !   (B * G)_{ii} = lambda_old * (1 - G_{ii})
           !
-          ! Using matrix determinant lemma:
-          !   R_ferm = 1 - 2 * (B * G)_{ii} = 1 - 2 * lambda_old * (1 - G_{ii})
+          ! Using matrix determinant lemma for rank-1 update:
+          !   det(1 + P_new*B) / det(1 + P_old*B) = 1 + v^T G u
+          ! where ΔP = P_new - P_old = -2*lambda_old * e_i * e_i^T
+          !
+          !   R_ferm = 1 - 2*lambda_old * (B*G)_{ii}
+          !          = 1 - 2*lambda_old * lambda_old * (1 - G_{ii})
+          !          = 1 - 2*(1 - G_{ii})  (since lambda_old^2 = 1)
+          !          = 2*G_{ii} - 1
+          !
+          ! CRITICAL: The lambda_old factors CANCEL OUT because:
+          !   - One factor comes from ΔP = -2*lambda_old * ...
+          !   - One factor comes from (B*G)_{ii} = lambda_old * (1-G_{ii})
+          !   - Product: lambda_old^2 = 1
           !
           ! For SU(N) symmetric systems:
           !   R_ferm_total = R_single^N_SUN
-          !
-          ! CRITICAL: The lambda_old factor is essential! Without it:
-          !   - When lambda_old = +1 and G_{ii} = 0.5: R = 0 (correct)
-          !   - When lambda_old = -1 and G_{ii} = 0.5: R = 2 (correct!)
-          ! The OLD formula R = 2*G_{ii} - 1 missed the lambda_old factor!
           ! ============================================================
           
           Implicit none
@@ -2180,20 +2215,16 @@
           
           ! Local
           Complex (Kind=Kind(0.d0)) :: R_single
-          Integer :: lambda_old
           
           If (.not. UseStrictGauss) then
              R_ferm = cmplx(1.d0, 0.d0, kind(0.d0))
              return
           Endif
           
-          lambda_old = lambda_field(i_site)
-          
-          ! CORRECT formula with lambda_old factor:
-          ! R_single = 1 - 2 * lambda_old * (1 - G_{ii})
-          R_single = cmplx(1.d0, 0.d0, kind(0.d0)) - &
-               cmplx(2.d0 * real(lambda_old, kind(0.d0)), 0.d0, kind(0.d0)) * &
-               (cmplx(1.d0, 0.d0, kind(0.d0)) - G(i_site, i_site))
+          ! CORRECT formula: R = 2*G_{ii} - 1
+          ! The lambda_old factors cancel out in the derivation
+          R_single = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_site, i_site) - &
+               cmplx(1.d0, 0.d0, kind(0.d0))
           
           ! For SU(N) symmetry, total ratio is R^{N_SUN}
           R_ferm = R_single ** N_SUN
@@ -2218,27 +2249,29 @@
         Subroutine Lambda_Update_Green_site(i_site, G, R_ferm)
           !
           ! ============================================================
-          ! Sherman-Morrison update with CORRECT lambda_old factor!
+          ! Sherman-Morrison update for lambda flip at site i
           ! ============================================================
           ! For SU(N) symmetric systems in ALF:
           ! - G has dimension Ndim x Ndim = Latt%N x Latt%N
           ! - All N_SUN colors share the same Green function
           ! - Only ONE rank-1 update is needed
           !
-          ! From the derivation in Lambda_Ferm_Ratio_site:
-          !   R_single = 1 - 2 * lambda_old * (1 - G_{ii})
+          ! The SM update formula for det(A + u*v^T) / det(A):
+          !   A^{-1}_new = A^{-1} - (A^{-1} u) (v^T A^{-1}) / (1 + v^T A^{-1} u)
           !
-          ! The SM update formula is:
-          !   G_new = G - (G u) (v^T G) / R_single
-          ! where u = e_i, v = -2*lambda_old * B^T e_i
+          ! With G = (1 + P*B)^{-1} and ΔP = -2*lambda_old * e_i * e_i^T:
+          !   u_eff = G * (-2*lambda_old * e_i) = -2*lambda_old * G[:,i]
+          !   v_eff^T = e_i^T * B
+          !   R_single = 1 + v_eff^T u_eff = 1 - 2*lambda_old*(B*G)_{ii}
+          !            = 2*G_{ii} - 1  (after simplification)
           !
-          ! Since B G = P_old (I - G), we have:
-          !   v^T G = -2*lambda_old * e_i^T B G = -2*lambda_old * (BG)_{i,:}
-          !         = -2*lambda_old * lambda_old * (1 - G)_{i,:}
-          !         = -2 * (1 - G)_{i,:}  (since lambda_old^2 = 1)
+          ! v_eff^T G = e_i^T * B * G = (B*G)_{i,:} = lambda_old * (e_i - G)_{i,:}
           !
-          ! So the update simplifies to:
-          !   G_new = G + 2 * G[:,i] ⊗ (e_i - G[i,:]) / R_single
+          ! G_new = G - u_eff * (v_eff^T * G) / R_single
+          !       = G + 2*lambda_old * G[:,i] * lambda_old * (e_i - G_{i,:}) / R_single
+          !       = G + 2 * G[:,i] ⊗ (e_i - G_{i,:}) / R_single
+          !
+          ! NOTE: The lambda_old factors cancel (lambda_old^2 = 1)
           ! ============================================================
           
           Implicit none
@@ -2248,8 +2281,8 @@
           Complex (Kind=Kind(0.d0)), INTENT(IN) :: R_ferm
           
           ! Local
-          Integer :: N, I, J, lambda_old
-          Complex (Kind=Kind(0.d0)) :: R_single, G_ii, coeff
+          Integer :: N, I, J
+          Complex (Kind=Kind(0.d0)) :: R_single, coeff
           Complex (Kind=Kind(0.d0)), allocatable :: G_col(:), delta_row(:)
           
           If (.not. UseStrictGauss) return
@@ -2258,16 +2291,9 @@
           
           Allocate(G_col(N), delta_row(N))
           
-          ! Get current lambda value (BEFORE the flip - the flip already happened!)
-          ! We need the OLD value, so we flip the sign back
-          lambda_old = -lambda_field(i_site)  ! Current value is NEW, so negate to get OLD
-          
-          G_ii = G(i_site, i_site)
-          
-          ! CORRECT R_single with lambda_old:
-          R_single = cmplx(1.d0, 0.d0, kind(0.d0)) - &
-               cmplx(2.d0 * real(lambda_old, kind(0.d0)), 0.d0, kind(0.d0)) * &
-               (cmplx(1.d0, 0.d0, kind(0.d0)) - G_ii)
+          ! R_single = 2*G_{ii} - 1 (lambda_old factors cancel)
+          R_single = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_site, i_site) - &
+               cmplx(1.d0, 0.d0, kind(0.d0))
           
           ! G_col = G(:, i_site)
           G_col(:) = G(:, i_site)
