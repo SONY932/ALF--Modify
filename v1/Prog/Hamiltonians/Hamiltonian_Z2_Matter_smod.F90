@@ -621,19 +621,21 @@
                 S0 = S0*DW_Ising_Flux(F1,F2)
                 
                 ! ================================================================
-                ! STRICT GAUSS CONSTRAINT: Star-product time coupling for sigma
+                ! STRICT GAUSS CONSTRAINT: sigma update
                 ! ================================================================
-                ! S_time_plaq = -K_time * sum_{r,n} X_r(n) * X_r(n+1)
-                ! This enforces that the star product X_r = prod sigma^z_b
-                ! is consistent across adjacent time slices.
+                ! NOTE: The star-product time consistency for sigma is ALREADY
+                ! enforced by DW_Ising_tau! When Ham_g > 0, the transverse field
+                ! -g * sum sigma^x gives time-direction Ising coupling via Trotter.
+                ! If each sigma link is consistent in time (via DW_Ising_tau),
+                ! then the star product X_r = prod sigma^z automatically satisfies
+                ! time consistency: X_r(n) = X_r(n+1).
                 !
-                ! When sigma link flips, star products at both endpoints change.
-                ! This adds an additional Boltzmann weight factor.
+                ! Therefore, NO additional star-product coupling is needed here!
+                ! The Gauss constraint is fully implemented by:
+                !   1. DW_Ising_tau (from Ham_g) - sigma time consistency
+                !   2. DW_Matter_tau (from Ham_h) - tau time consistency  
+                !   3. Gamma_Gauss (from PRX A6) - tau TIME-BOUNDARY coupling only
                 ! ================================================================
-                If (UseStrictGauss) then
-                   R_Gauss = exp(-Compute_Delta_S_Star_Time(n, nt))
-                   S0 = S0 * R_Gauss
-                endif
                 
              else
                 S0 = 1.d0
@@ -804,9 +806,6 @@
                      & tau_z_0_old, tau_z_M1_old, tau_z_0_new, tau_z_M1_new)
                 R_Gauss = exp(-Delta_S_Gauss)
                 
-                ! DEBUG: Print tau update Gauss weight
-                ! Write(6,'(A,I2,A,I2,A,F8.4)') '  tau_update(I=',I,',nt=',ntau,'): R_Gauss=',R_Gauss
-                
                 ! Multiply S0_Matter by Gauss weight
                 S0_Matter = S0_Matter * R_Gauss
              endif
@@ -935,15 +934,13 @@
           If (Abs(Ham_U)   > Zero )   N_ops = N_ops + Latt%N                          !  Hubbard
           If (Abs(Ham_TZ2) > Zero )   N_ops = N_ops + Latt%N*Latt_unit%N_coord        !  Z2 gauge fields
           If (Abs(Ham_T  ) > Zero )   N_ops = N_ops + Latt%N*Latt_unit%N_coord + 1    !  Matter fields.
-          If (UseStrictGauss       )  N_ops = N_ops + Latt%N                          !  Lambda fields for Gauss projection
+          ! NOTE: Lambda field N_ops REMOVED - lambda is no longer an MC variable (PRX A6 summation)
+          ! Gauss constraint is enforced via tau boundary coupling only
 
           ! Setup list of bonds for the square lattice.
-          ! Field types: 1=gauge, 2=bond matter, 3=Hubbard, 4=site matter, 5=Gauss lambda
-          If (UseStrictGauss) then
-             Allocate ( Field_list(Latt%N,3,5),  Field_list_inv(N_ops,3) )
-          else
-             Allocate ( Field_list(Latt%N,3,4),  Field_list_inv(N_ops,3) )
-          endif
+          ! Field types: 1=gauge, 2=bond matter, 3=Hubbard, 4=site matter
+          ! NOTE: Type 5 (lambda) removed - no longer used
+          Allocate ( Field_list(Latt%N,3,4),  Field_list_inv(N_ops,3) )
           nc = 0
           If (Abs(Ham_U)   > Zero )  then
              DO I = 1,Latt%N
@@ -1024,19 +1021,10 @@
             Field_list_inv(nc,3) = N_Field_type
           Endif
           
-          ! Add lambda fields for strict Gauss constraint
-          ! Field type 5: Lambda field for Gauss projection at each site
-          If (UseStrictGauss) then
-             N_Field_type = 5
-             DO I = 1, Latt%N
-                nc = nc + 1
-                n_orientation = 3  ! Site-centered, no orientation
-                Field_list(I, n_orientation, N_Field_type) = nc
-                Field_list_inv(nc, 1) = I
-                Field_list_inv(nc, 2) = n_orientation
-                Field_list_inv(nc, 3) = N_Field_type
-             ENDDO
-          Endif
+          ! NOTE: Lambda field initialization REMOVED - lambda is no longer an MC variable
+          ! Field type 5 is no longer used. Gauss constraint is enforced via:
+          ! 1. tau time-boundary coupling (K_G term in Global_move_tau)
+          ! 2. Existing DW_Ising_tau for sigma time-direction consistency
 
           !Test
           !Do I = 1,Latt%N
@@ -1178,18 +1166,14 @@
           endif
           
           Write(6,*) '============================================================'
-          Write(6,*) 'STRICT Gauss constraint initialized (FULL implementation):'
+          Write(6,*) 'STRICT Gauss constraint initialized:'
           Write(6,*) '============================================================'
-          Write(6,*) '  Part 1: TAU time-boundary coupling'
+          Write(6,*) '  TAU time-boundary coupling (PRX A6):'
           Write(6,*) '    K_G (Gamma_Gauss) = ', Gamma_Gauss
-          Write(6,*) '    S_tau = -K_G * sum_i tau^z(i,0) * tau^z(i,M-1)'
+          Write(6,*) '    S_boundary = -K_G * sum_i tau^z(i,0) * tau^z(i,M-1)'
           Write(6,*) ''
-          Write(6,*) '  Part 2: SIGMA star-product time coupling'
-          Write(6,*) '    K_time (Gamma_Gauss_Sigma) = ', Gamma_Gauss_Sigma
-          Write(6,*) '    S_star = -K_time * sum_{r,n} X_r(n) * X_r(n+1)'
-          Write(6,*) '    where X_r = prod_{b in +r} sigma^z_b (star product)'
-          Write(6,*) ''
-          Write(6,*) '  Combined: Strict G_r = Q_r for all r and tau!'
+          Write(6,*) '  NOTE: Sigma time consistency is already enforced by'
+          Write(6,*) '        DW_Ising_tau (from Ham_g transverse field).'
           Write(6,*) '============================================================'
 
         End Subroutine Setup_Gauss_constraint
@@ -2803,8 +2787,8 @@
         Nt_sequential_end   = 0
         If (abs(Ham_U  ) > Zero ) Nt_sequential_end = Nt_sequential_end + Latt%N
         If (abs(Ham_TZ2) > Zero ) Nt_sequential_end = Nt_sequential_end + Latt%N*Latt_unit%N_coord
-        ! Add lambda field sequential updates for strict Gauss constraint
-        If (UseStrictGauss      ) Nt_sequential_end = Nt_sequential_end + Latt%N
+        ! NOTE: Lambda field updates removed - no longer used after PRX A6 summation
+        ! Gauss constraint is enforced via tau boundary coupling + existing DW_Ising_tau
         N_Global_tau = 0
         if (abs(Ham_T) > Zero )  N_Global_tau        = Latt%N/4
 

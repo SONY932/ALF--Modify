@@ -226,15 +226,21 @@ Ham_g = 1.0  ! 给出 K_time ~ 2.3
    - 当 Ham_h → 0 或 Ham_g → 0 时，K → ∞
    - 代码中设置了最大值截断 `K_max = 100`
 
-2. **两个耦合都是必须的**
-   - 只有 K_G（τ 边界）：不是严格 Gauss，σ 不受约束
-   - 只有 K_time（σ 星乘积）：不完整
-   - 两者都有：完整的严格 Gauss 约束
+2. **关于 σ 星乘积时间耦合**
+   - 根据 PRX/PNAS，σ 的时间方向一致性实际上已由 `DW_Ising_tau` 实现
+   - 当 Ham_g > 0 时，横场项 $-g \sum \sigma^x$ 的 Trotter 分解自然产生时间方向耦合
+   - 如果每个 σ link 在时间方向一致（通过 DW_Ising_tau），星乘积自动满足 $X_r(n) = X_r(n+1)$
+   - 因此 `Compute_Delta_S_Star_Time` 在当前实现中**未被激活**，以避免重复约束
 
-3. **性能考虑**
-   - `Compute_Delta_S_Star_Time` 在每次 σ 更新时被调用
-   - 它计算 6 个星乘积值，有一定开销
-   - 对于大系统可能需要优化
+3. **Lambda 场相关代码已完全移除**
+   - 旧实现错误地将 λ 视为独立 MC 变量
+   - PRX A5-A6 表明 λ 被对 λ 求和消去，只留下纯玻色 τ 边界耦合
+   - 关键修复：移除了 `Setup_Ising_action_and_field_list` 中为 λ 场分配的 N_ops 和 Field_list
+   - 这修复了导致 NaN 和 acceptance=0 的数组越界问题
+
+4. **性能考虑**
+   - τ 边界耦合仅在 nt=1 或 nt=Ltrot 时计算，开销很小
+   - Green 函数精度正常（~10^-11），模拟稳定
 
 ---
 
