@@ -70,10 +70,9 @@
         procedure, nopass :: Get_Delta_S0_global
         procedure, nopass :: S0
         ! Strict Gauss constraint (PRX 10.041057 Appendix A)
-        procedure, nopass :: Apply_P_Lambda_To_B
-        procedure, nopass :: Apply_P_Lambda_To_B_Right
+        ! NOTE: After PRX lambda summation, only bosonic time-boundary coupling remains
+        ! NO lambda sampling, NO fermion propagator modification
         procedure, nopass :: Use_Strict_Gauss
-        procedure, nopass :: Sweep_Lambda
         procedure, nopass :: GaussViol_Diagnostic => Measure_GaussViolation_Diagnostic
 #ifdef HDF5
         procedure, nopass :: write_parameters_hdf5
@@ -119,25 +118,19 @@
 
       !>    Storage for strict Gauss constraint (PRX 10.041057 Appendix A)
       !>    ============================================================
-      !>    CRITICAL: lambda is TAU-INDEPENDENT! Only spatial index!
-      !>    lambda_field(r) = +1 or -1, the Z2 Lagrange multiplier
-      !>    This is the key insight from PRX Appendix A (A5-A6)
-      Integer, allocatable   :: lambda_field(:)  ! lambda_field(site), NOT (site,tau)!
+      !>    After summing over lambda in PRX A5-A6, the Gauss constraint
+      !>    reduces to a PURE BOSONIC time-boundary coupling:
+      !>      S_boundary = -K_G * sum_i tau^z(i,0) * tau^z(i,M-1)
+      !>    NO lambda field in MC! NO modification to fermion propagator!
+      !>    ============================================================
       !>    Background charge Q_r for Gauss sector selection
       !>    Q_r = +1 for even sector, Q_r = -1 for odd sector
-      !>    G_r = Q_r * tau_r^x * prod sigma_b^x (NO (-1)^n_f in path integral!)
+      !>    G_r = Q_r * tau_r^x * prod sigma_b^x (for observables)
       Integer, allocatable   :: Q_background(:)
-      !>    Gamma parameter for Gauss projection (PRX A6)
-      !>    gamma = -0.5 * ln(tanh(epsilon * h))
-      !>    W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
-      Real (Kind=Kind(0.d0)) :: Gamma_Gauss
-      !>    Storage for B_M' (B matrix at final time slice with P[lambda] applied)
-      !>    This is used for lambda update Sherman-Morrison formula
-      Complex (Kind=Kind(0.d0)), allocatable :: B_lambda_slice(:,:)
-      !>    Dimension info for lambda update
-      Integer :: N_sites_lambda = 0
-      Integer :: N_spin_lambda = 1   ! 1 or 2
-      Integer :: dimF_lambda = 0     ! = N_sites * N_spin
+      !>    K_Gauss: coupling strength for time-boundary tau^z term
+      !>    K_G = -0.5 * ln(tanh(epsilon * h))  (from PRX A6 after lambda sum)
+      !>    Larger K_G -> stronger Gauss constraint enforcement
+      Real (Kind=Kind(0.d0)) :: Gamma_Gauss  ! Keep name for compatibility, but meaning is K_G
 
     contains
       
@@ -641,29 +634,10 @@
           endif
           
           ! ================================================================
-          ! GAUSS CONSTRAINT: lambda field flip (Field_type = 5)
-          ! Following PRX 10.041057 Appendix A (A6):
-          !   W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
-          !
-          ! When lambda_i -> -lambda_i:
-          !   R_bose = exp(-2 * gamma * tau_z(i,0) * tau_z(i,M-1) * lambda_old)
-          !   NOTE: NEGATIVE sign! This is W_new / W_old.
-          !
-          ! CRITICAL: lambda is TAU-INDEPENDENT!
-          ! We flip lambda_field(I), not lambda at specific tau.
+          ! Strict Gauss constraint (PRX A6): NO lambda field updates!
+          ! After lambda summation, only bosonic time-boundary tau^z coupling.
+          ! Lambda is NOT a MC variable - no Field_type=5 updates.
           ! ================================================================
-          If (UseStrictGauss .and. Field_list_inv(n,3) == 5) then
-             I = Field_list_inv(n,1)  ! Site index
-             
-             ! Compute PRX A6 weight ratio for lambda flip
-             R_Gauss = Compute_Gauss_Weight_Ratio_Lambda_PRX(I)
-             
-             S0 = R_Gauss
-             
-             ! Note: The fermion part is handled separately through
-             ! det(1 + P[lambda_new] * B_total) / det(1 + P[lambda_old] * B_total)
-             ! This is NOT the per-tau P(tau) approach!
-          endif
 
         end function S0
 
@@ -787,10 +761,10 @@
           endif
 
           ! ================================================================
-          ! GAUSS CONSTRAINT: tau spin flip (PRX A6 framework)
+          ! GAUSS CONSTRAINT: tau spin flip (PRX A6 pure bosonic)
           ! ================================================================
-          ! In PRX A6, Gauss weight depends ONLY on tau_z at time boundaries:
-          !   W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))
+          ! After summing over lambda in PRX A5-A6, Gauss weight becomes:
+          !   W_i = exp(K_G * tau_z(i,0) * tau_z(i,M-1))  [NO lambda!]
           !
           ! tau flip affects Gauss weight ONLY if it changes tau_z at:
           !   - nt = 1 (tau = 0), or
@@ -1103,23 +1077,26 @@
 !> 5. Fermion det modified: det(1 + P[lambda] * B_total), NOT per-tau P(tau)
 !--------------------------------------------------------------------
         Subroutine Setup_Gauss_constraint
+          !
+          ! ============================================================
+          ! Setup for strict Gauss constraint (PRX 10.041057 Appendix A)
+          ! ============================================================
+          ! After summing over lambda in PRX A5-A6, the Gauss constraint
+          ! reduces to a PURE BOSONIC time-boundary coupling:
+          !   S_boundary = -K_G * sum_i tau^z(i,0) * tau^z(i,M-1)
+          !
+          ! Key points:
+          ! - NO lambda field as MC variable
+          ! - NO modification to fermion propagator  
+          ! - Only a bosonic coupling at time boundaries
+          ! ============================================================
 
           Implicit none
           
           Integer :: I, Ix, Iy
-          Real (Kind=Kind(0.d0)) :: epsilon_h, Gamma_max, rand_val
+          Real (Kind=Kind(0.d0)) :: epsilon_h, K_G_max
           
-          ! ============================================================
-          ! CRITICAL: lambda is TAU-INDEPENDENT per PRX Appendix A!
-          ! ============================================================
-          ! Allocate lambda field array: lambda_field(site) only!
-          Allocate(lambda_field(Latt%N))
-          ! Initialize all lambda to +1 for stability
-          ! NOTE: Random initialization causes numerical instability
-          ! because R_ferm = 0 at half-filling prevents λ updates
-          lambda_field = +1
-          
-          ! Allocate background charge array Q_r
+          ! Allocate background charge array Q_r (for observables only)
           Allocate(Q_background(Latt%N))
           
           ! Initialize Q_background based on GaussSector
@@ -1147,71 +1124,37 @@
           end select
           
           ! ============================================================
-          ! Compute Gamma_Gauss = -0.5 * ln(tanh(epsilon * h))  [PRX A6]
+          ! Compute K_G (stored in Gamma_Gauss for compatibility)
+          ! K_G = -0.5 * ln(tanh(epsilon * h))  [from PRX A6 after lambda sum]
           ! ============================================================
-          ! epsilon = dtau, h = Ham_h (transverse field strength)
-          !
-          ! Numerical stability:
-          ! When epsilon*h is very small, tanh(epsilon*h) ~ epsilon*h
-          ! and gamma ~ -0.5 * ln(epsilon*h) -> infinity
-          ! We use a cutoff to avoid numerical overflow.
-          ! 
-          ! Physical interpretation of limits:
-          ! - gamma -> infinity: strict projection, only configs with
-          !   tau_z(0) * lambda * tau_z(M-1) = +1 survive
-          ! - gamma -> 0: no constraint from lambda boundary term
+          ! Physical interpretation:
+          ! - K_G -> infinity: strict projection (tau^z_0 = tau^z_{M-1} enforced)
+          ! - K_G -> 0: no time-boundary coupling
           ! ============================================================
           epsilon_h = Dtau * Ham_h
-          
-          ! Maximum gamma value to avoid overflow (exp(2*Gamma_max) ~ 10^87)
-          Gamma_max = 100.d0
+          K_G_max = 100.d0
           
           If (Ham_h > Zero .and. epsilon_h > 1.d-10) then
-             ! Standard case: gamma = -0.5 * ln(tanh(epsilon * h))
              If (epsilon_h > 0.01d0) then
-                ! For larger epsilon*h, use exact formula
                 Gamma_Gauss = -0.5d0 * log(tanh(epsilon_h))
              else
-                ! For small epsilon*h, use asymptotic expansion
-                ! tanh(x) ~ x - x^3/3, so -ln(tanh(x)) ~ -ln(x) + x^2/3
-                ! gamma ~ -0.5 * ln(epsilon*h) = 0.5 * ln(1/(epsilon*h))
                 Gamma_Gauss = -0.5d0 * log(epsilon_h) + epsilon_h**2 / 6.d0
              endif
              
-             ! Apply cutoff for numerical stability
-             If (Gamma_Gauss > Gamma_max) then
-                Write(6,*) 'WARNING: Gamma_Gauss capped at ', Gamma_max, &
-                           ' (original = ', Gamma_Gauss, ')'
-                Gamma_Gauss = Gamma_max
+             If (Gamma_Gauss > K_G_max) then
+                Write(6,*) 'WARNING: K_G capped at ', K_G_max
+                Gamma_Gauss = K_G_max
              endif
-             
-             Write(6,*) 'Gamma_Gauss = ', Gamma_Gauss, ' (epsilon*h = ', epsilon_h, ')'
           else
-             ! When h -> 0, gamma -> infinity; use maximum value for strict projection
-             ! This effectively forces tau_z(0) * lambda * tau_z(M-1) = +1
-             Gamma_Gauss = Gamma_max
-             Write(6,*) 'WARNING: Ham_h ~ 0, Gamma_Gauss set to max = ', Gamma_max
-             Write(6,*) '         (strict projection limit)'
+             Gamma_Gauss = K_G_max
+             Write(6,*) 'WARNING: Ham_h ~ 0, K_G set to max = ', K_G_max
           endif
           
-          ! ============================================================
-          ! Allocate B_lambda_slice for lambda update Sherman-Morrison
-          ! ============================================================
-          N_sites_lambda = Latt%N
-          N_spin_lambda = 2  ! Two spin species (up/down) in Z2_Matter model
-          dimF_lambda = N_sites_lambda * N_spin_lambda
-          
-          If (allocated(B_lambda_slice)) deallocate(B_lambda_slice)
-          Allocate(B_lambda_slice(dimF_lambda, dimF_lambda))
-          B_lambda_slice = cmplx(0.d0, 0.d0, kind(0.d0))
-          
           Write(6,*) '============================================================'
-          Write(6,*) 'Strict Gauss constraint initialized (PRX Appendix A):'
-          Write(6,*) '  lambda is TAU-INDEPENDENT: lambda_field(site)'
-          Write(6,*) '  Sites: ', Latt%N
-          Write(6,*) '  W_i = exp(gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1))'
-          Write(6,*) '  Fermion: det(1 + P[lambda] * B_total)'
-          Write(6,*) '  B_lambda_slice allocated: ', dimF_lambda, 'x', dimF_lambda
+          Write(6,*) 'Strict Gauss constraint initialized (PRX A6 pure bosonic):'
+          Write(6,*) '  K_G (Gamma_Gauss) = ', Gamma_Gauss
+          Write(6,*) '  S_boundary = -K_G * sum_i tau^z(i,0) * tau^z(i,M-1)'
+          Write(6,*) '  NO lambda field, NO fermion propagator modification'
           Write(6,*) '============================================================'
 
         End Subroutine Setup_Gauss_constraint
@@ -1313,7 +1256,7 @@
           Implicit none
           Integer, Intent(IN) :: I
           
-          Integer :: tau_z_0, tau_z_M1, lambda_i
+          Integer :: tau_z_0, tau_z_M1
           
           If (.not. UseStrictGauss) then
              Compute_Gauss_Action_PRX = 0.d0
@@ -1322,10 +1265,9 @@
           
           tau_z_0  = Get_Tau_Z_At_Time_0(I)
           tau_z_M1 = Get_Tau_Z_At_Time_M1(I)
-          lambda_i = lambda_field(I)
           
-          ! S_i = -gamma * tau_z(i,0) * lambda_i * tau_z(i,M-1)
-          Compute_Gauss_Action_PRX = -Gamma_Gauss * real(tau_z_0 * lambda_i * tau_z_M1, kind(0.d0))
+          ! S_i = -K_G * tau_z(i,0) * tau_z(i,M-1)  [NO lambda!]
+          Compute_Gauss_Action_PRX = -Gamma_Gauss * real(tau_z_0 * tau_z_M1, kind(0.d0))
 
         End Function Compute_Gauss_Action_PRX
 
@@ -1403,13 +1345,23 @@
 !--------------------------------------------------------------------
         Real (Kind=Kind(0.d0)) Function Compute_Delta_S_Gauss_Tau_Update(I, &
              & tau_z_0_old, tau_z_M1_old, tau_z_0_new, tau_z_M1_new)
+          !
+          ! ============================================================
+          ! Computes Delta S for tau spin flip at time boundary
+          ! ============================================================
+          ! After summing over lambda in PRX A5-A6, the Gauss constraint
+          ! gives a PURE BOSONIC time-boundary coupling (NO lambda!):
+          !   S_boundary = -K_G * sum_i tau^z(i,0) * tau^z(i,M-1)
+          !
+          ! Delta_S = S_new - S_old
+          !         = -K_G * (tau_z_0_new * tau_z_M1_new - tau_z_0_old * tau_z_M1_old)
+          ! ============================================================
 
           Implicit none
           Integer, Intent(IN) :: I
           Integer, Intent(IN) :: tau_z_0_old, tau_z_M1_old
           Integer, Intent(IN) :: tau_z_0_new, tau_z_M1_new
           
-          Integer :: lambda_i
           Real (Kind=Kind(0.d0)) :: S_old, S_new
           
           If (.not. UseStrictGauss) then
@@ -1417,10 +1369,10 @@
              return
           endif
           
-          lambda_i = lambda_field(I)
-          
-          S_old = -Gamma_Gauss * real(tau_z_0_old * lambda_i * tau_z_M1_old, kind(0.d0))
-          S_new = -Gamma_Gauss * real(tau_z_0_new * lambda_i * tau_z_M1_new, kind(0.d0))
+          ! Pure bosonic boundary coupling: S = -K_G * tau_z(0) * tau_z(M-1)
+          ! NO lambda field!
+          S_old = -Gamma_Gauss * real(tau_z_0_old * tau_z_M1_old, kind(0.d0))
+          S_new = -Gamma_Gauss * real(tau_z_0_new * tau_z_M1_new, kind(0.d0))
           
           Compute_Delta_S_Gauss_Tau_Update = S_new - S_old
 
@@ -2813,13 +2765,22 @@
 !> @param[IN] sweep_number  Integer, current MC sweep number (for logging)
 !--------------------------------------------------------------------
         Subroutine Measure_GaussViolation_Diagnostic(sweep_number)
+          !
+          ! ============================================================
+          ! Diagnostic for strict Gauss constraint (PRX A6 pure bosonic)
+          ! ============================================================
+          ! Measures:
+          !   <G_r> = average of Gauss operator over all sites and tau
+          !   GaussViol = <(G_r - 1)^2>  (should be ~ 0 if constraint works)
+          !   Tau_BC_sum = average of tau^z_0 * tau^z_{M-1} (boundary coupling)
+          ! ============================================================
           
           Implicit none
           Integer, Intent(IN) :: sweep_number
           
           Integer :: i_site, nt, G_r
           Real (Kind=Kind(0.d0)) :: GaussViol, Gauss_sum
-          Real (Kind=Kind(0.d0)) :: Lambda_boundary_sum
+          Real (Kind=Kind(0.d0)) :: Tau_BC_sum
           Integer :: tau_z_0, tau_z_M1
           Integer :: N_total
           
@@ -2827,7 +2788,7 @@
           
           GaussViol = 0.d0
           Gauss_sum = 0.d0
-          Lambda_boundary_sum = 0.d0
+          Tau_BC_sum = 0.d0
           N_total = Ltrot * Latt%N
           
           ! Compute GaussViol and Gauss_sum over all sites and time slices
@@ -2843,14 +2804,13 @@
           GaussViol = GaussViol / real(N_total, kind(0.d0))
           Gauss_sum = Gauss_sum / real(N_total, kind(0.d0))
           
-          ! Compute lambda boundary coupling sum
+          ! Compute time-boundary tau^z coupling sum (NO lambda!)
           Do i_site = 1, Latt%N
              tau_z_0  = Get_Tau_Z_At_Time_0(i_site)
              tau_z_M1 = Get_Tau_Z_At_Time_M1(i_site)
-             Lambda_boundary_sum = Lambda_boundary_sum + &
-                real(tau_z_0 * lambda_field(i_site) * tau_z_M1, kind(0.d0))
+             Tau_BC_sum = Tau_BC_sum + real(tau_z_0 * tau_z_M1, kind(0.d0))
           Enddo
-          Lambda_boundary_sum = Lambda_boundary_sum / real(Latt%N, kind(0.d0))
+          Tau_BC_sum = Tau_BC_sum / real(Latt%N, kind(0.d0))
           
           ! Print diagnostic info
           Write(6,'(A)')        '============================================================'
@@ -2858,8 +2818,8 @@
           Write(6,'(A)')        '============================================================'
           Write(6,'(A,E15.8)')  '   <G_r>         (should be ~1): ', Gauss_sum
           Write(6,'(A,E15.8)')  '   GaussViol     (should be ~0): ', GaussViol
-          Write(6,'(A,E15.8)')  '   Lambda_BC_sum (PRX A6 check): ', Lambda_boundary_sum
-          Write(6,'(A,F10.6)')  '   Gamma_Gauss:                  ', Gamma_Gauss
+          Write(6,'(A,E15.8)')  '   <tau0*tauM1>  (boundary corr): ', Tau_BC_sum
+          Write(6,'(A,F10.6)')  '   K_G (Gamma_Gauss):             ', Gamma_Gauss
           Write(6,'(A)')        '------------------------------------------------------------'
           
           ! Warning if GaussViol is too large
@@ -2867,9 +2827,8 @@
              Write(6,'(A)')     ' *** WARNING: GaussViol > 1e-6 ***'
              Write(6,'(A)')     ' This indicates the strict Gauss constraint may not be working!'
              Write(6,'(A)')     ' Check:'
-             Write(6,'(A)')     '   1. P[lambda] is correctly applied to B_M in wrapur'
-             Write(6,'(A)')     '   2. B_lambda_slice is updated when lambda flips'
-             Write(6,'(A)')     '   3. Gauss weight ratios are included in all updates'
+             Write(6,'(A)')     '   1. K_G (Gamma_Gauss) is large enough'
+             Write(6,'(A)')     '   2. Gauss weight ratios are included in tau updates'
           Endif
           Write(6,'(A)')        '============================================================'
           
@@ -3045,22 +3004,9 @@
         endif
         
         ! ============================================================
-        ! Sync nsigma with lambda_field for strict Gauss constraint (PRX A6)
-        ! CRITICAL: lambda is TAU-INDEPENDENT per PRX Appendix A!
+        ! Strict Gauss constraint (PRX A6): NO lambda field in MC!
+        ! After lambda summation, only bosonic time-boundary coupling remains.
         ! ============================================================
-        ! lambda_field(site) was already initialized in Setup_Gauss_constraint.
-        ! Here we only sync nsigma for ALF compatibility (don't overwrite lambda_field!)
-        If (UseStrictGauss) then
-           Do I = 1, Latt%N
-              ! Sync nsigma with lambda_field (all tau share same lambda)
-              nc = Field_list(I, 3, 5)
-              Do nt = 1, Ltrot
-                 Initial_field(nc, nt) = cmplx(real(lambda_field(I), kind(0.d0)), 0.d0, Kind(0.d0))
-              Enddo
-           Enddo
-           Write(6,'(A,4I3)') ' Lambda field initial values: ', &
-                (lambda_field(I), I=1,min(4,Latt%N))
-        endif
 
         deallocate (Isigma, Isigma1)
 

@@ -83,11 +83,6 @@ module wrapur_mod
 !                  X = Phi(nsigma(n,nt),Op_V(n,nf)%type)
                  Call Op_mmultR(Tmp,Op_V(n,nf),nsigma%f(n,nt),'n',nt)
               ENDDO
-              ! Apply P[lambda] at time boundary (nt = Ltrot) for strict Gauss constraint
-              ! This gives B_total' = P[lambda] * B_total (PRX 10.041057 Appendix A)
-              If (nt == Ltrot .and. ham%Use_Strict_Gauss()) then
-                 Call ham%Apply_P_Lambda_To_B(TMP, nf)
-              Endif
            ENDDO
            CALL MMULT(TMP1,TMP, udvr(nf_eff)%U)
            if(allocated(udvr(nf_eff)%V)) then
@@ -121,11 +116,6 @@ module wrapur_mod
               Do n = 1,Size(Op_V,1)
                  Call Op_mmultR(UDVR(nf_eff)%U,Op_V(n,nf),nsigma%f(n,nt),'n',nt)
               ENDDO
-              ! Apply P[lambda] at time boundary (nt = Ltrot) for strict Gauss constraint
-              ! This gives B_total' = P[lambda] * B_total (PRX 10.041057 Appendix A)
-              If (nt == Ltrot .and. ham%Use_Strict_Gauss()) then
-                 Call ham%Apply_P_Lambda_To_B(UDVR(nf_eff)%U, nf)
-              Endif
            ENDDO
 
            CALL UDVR(nf_eff)%decompose
