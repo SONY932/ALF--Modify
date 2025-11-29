@@ -118,19 +118,27 @@
 
       !>    Storage for strict Gauss constraint (PRX 10.041057 Appendix A)
       !>    ============================================================
-      !>    After summing over lambda in PRX A5-A6, the Gauss constraint
-      !>    reduces to a PURE BOSONIC time-boundary coupling:
-      !>      S_boundary = -K_G * sum_i tau^z(i,0) * tau^z(i,M-1)
-      !>    NO lambda field in MC! NO modification to fermion propagator!
+      !>    STRICT Gauss constraint requires TWO terms:
+      !>    
+      !>    1. TAU time-boundary coupling (from PRX A5-A6 lambda sum):
+      !>       S_tau_boundary = -K_G * sum_i tau^z(i,0) * tau^z(i,M-1)
+      !>    
+      !>    2. SIGMA star-product time coupling (for electric field constraint):
+      !>       S_time_plaq = -K_time * sum_{r,n} X_r(n) * X_r(n+1)
+      !>       where X_r(n) = prod_{b in +r} sigma^z_{b,n} (star product)
+      !>    
+      !>    Both terms are needed for STRICT Gauss law!
       !>    ============================================================
       !>    Background charge Q_r for Gauss sector selection
       !>    Q_r = +1 for even sector, Q_r = -1 for odd sector
       !>    G_r = Q_r * tau_r^x * prod sigma_b^x (for observables)
       Integer, allocatable   :: Q_background(:)
-      !>    K_Gauss: coupling strength for time-boundary tau^z term
-      !>    K_G = -0.5 * ln(tanh(epsilon * h))  (from PRX A6 after lambda sum)
-      !>    Larger K_G -> stronger Gauss constraint enforcement
-      Real (Kind=Kind(0.d0)) :: Gamma_Gauss  ! Keep name for compatibility, but meaning is K_G
+      !>    K_G (Gamma_Gauss): tau time-boundary coupling strength
+      !>    K_G = -0.5 * ln(tanh(epsilon * h_tau))
+      Real (Kind=Kind(0.d0)) :: Gamma_Gauss
+      !>    K_time (Gamma_Gauss_Sigma): sigma star-product time coupling strength
+      !>    K_time = -0.5 * ln(tanh(epsilon * h_sigma)) = 0.5 * ln(coth(epsilon * h_sigma))
+      Real (Kind=Kind(0.d0)) :: Gamma_Gauss_Sigma
 
     contains
       
@@ -613,19 +621,19 @@
                 S0 = S0*DW_Ising_Flux(F1,F2)
                 
                 ! ================================================================
-                ! GAUSS CONSTRAINT: sigma (gauge link) flip
+                ! STRICT GAUSS CONSTRAINT: Star-product time coupling for sigma
                 ! ================================================================
-                ! In PRX A6 framework, the Gauss constraint is enforced through:
-                !   1. Lambda field dynamics (W_i = exp(γ*τ^z(0)*λ*τ^z(M-1)))
-                !   2. The P[lambda] modification to fermion boundary condition
+                ! S_time_plaq = -K_time * sum_{r,n} X_r(n) * X_r(n+1)
+                ! This enforces that the star product X_r = prod sigma^z_b
+                ! is consistent across adjacent time slices.
                 !
-                ! IMPORTANT: The sigma update weight does NOT include Gauss constraint!
-                ! The constraint is implemented through lambda field, not sigma weight.
-                ! Sigma updates proceed with standard Ising weights (already computed above).
-                !
-                ! The Gauss operator G_r = Q_r * τ^x * X_r is used for MEASUREMENT only,
-                ! not for constraining sigma updates.
+                ! When sigma link flips, star products at both endpoints change.
+                ! This adds an additional Boltzmann weight factor.
                 ! ================================================================
+                If (UseStrictGauss) then
+                   R_Gauss = exp(-Compute_Delta_S_Star_Time(n, nt))
+                   S0 = S0 * R_Gauss
+                endif
                 
              else
                 S0 = 1.d0
@@ -1094,7 +1102,7 @@
           Implicit none
           
           Integer :: I, Ix, Iy
-          Real (Kind=Kind(0.d0)) :: epsilon_h, K_G_max
+          Real (Kind=Kind(0.d0)) :: epsilon_h, epsilon_g, K_G_max
           
           ! Allocate background charge array Q_r (for observables only)
           Allocate(Q_background(Latt%N))
@@ -1124,12 +1132,8 @@
           end select
           
           ! ============================================================
-          ! Compute K_G (stored in Gamma_Gauss for compatibility)
-          ! K_G = -0.5 * ln(tanh(epsilon * h))  [from PRX A6 after lambda sum]
-          ! ============================================================
-          ! Physical interpretation:
-          ! - K_G -> infinity: strict projection (tau^z_0 = tau^z_{M-1} enforced)
-          ! - K_G -> 0: no time-boundary coupling
+          ! Compute K_G (Gamma_Gauss) for TAU time-boundary coupling
+          ! K_G = -0.5 * ln(tanh(epsilon * h_tau))  [from PRX A6]
           ! ============================================================
           epsilon_h = Dtau * Ham_h
           K_G_max = 100.d0
@@ -1142,19 +1146,50 @@
              endif
              
              If (Gamma_Gauss > K_G_max) then
-                Write(6,*) 'WARNING: K_G capped at ', K_G_max
+                Write(6,*) 'WARNING: K_G (tau) capped at ', K_G_max
                 Gamma_Gauss = K_G_max
              endif
           else
              Gamma_Gauss = K_G_max
-             Write(6,*) 'WARNING: Ham_h ~ 0, K_G set to max = ', K_G_max
+             Write(6,*) 'WARNING: Ham_h ~ 0, K_G (tau) set to max = ', K_G_max
+          endif
+          
+          ! ============================================================
+          ! Compute K_time (Gamma_Gauss_Sigma) for SIGMA star-product coupling
+          ! K_time = -0.5 * ln(tanh(epsilon * h_sigma)) = 0.5 * ln(coth(epsilon * g))
+          ! This enforces star-product consistency across time slices!
+          ! ============================================================
+          epsilon_g = Dtau * Ham_g  ! Ham_g is the sigma transverse field
+          
+          If (Ham_g > Zero .and. epsilon_g > 1.d-10) then
+             If (epsilon_g > 0.01d0) then
+                Gamma_Gauss_Sigma = -0.5d0 * log(tanh(epsilon_g))
+             else
+                Gamma_Gauss_Sigma = -0.5d0 * log(epsilon_g) + epsilon_g**2 / 6.d0
+             endif
+             
+             If (Gamma_Gauss_Sigma > K_G_max) then
+                Write(6,*) 'WARNING: K_time (sigma) capped at ', K_G_max
+                Gamma_Gauss_Sigma = K_G_max
+             endif
+          else
+             Gamma_Gauss_Sigma = K_G_max
+             Write(6,*) 'WARNING: Ham_g ~ 0, K_time (sigma) set to max = ', K_G_max
           endif
           
           Write(6,*) '============================================================'
-          Write(6,*) 'Strict Gauss constraint initialized (PRX A6 pure bosonic):'
-          Write(6,*) '  K_G (Gamma_Gauss) = ', Gamma_Gauss
-          Write(6,*) '  S_boundary = -K_G * sum_i tau^z(i,0) * tau^z(i,M-1)'
-          Write(6,*) '  NO lambda field, NO fermion propagator modification'
+          Write(6,*) 'STRICT Gauss constraint initialized (FULL implementation):'
+          Write(6,*) '============================================================'
+          Write(6,*) '  Part 1: TAU time-boundary coupling'
+          Write(6,*) '    K_G (Gamma_Gauss) = ', Gamma_Gauss
+          Write(6,*) '    S_tau = -K_G * sum_i tau^z(i,0) * tau^z(i,M-1)'
+          Write(6,*) ''
+          Write(6,*) '  Part 2: SIGMA star-product time coupling'
+          Write(6,*) '    K_time (Gamma_Gauss_Sigma) = ', Gamma_Gauss_Sigma
+          Write(6,*) '    S_star = -K_time * sum_{r,n} X_r(n) * X_r(n+1)'
+          Write(6,*) '    where X_r = prod_{b in +r} sigma^z_b (star product)'
+          Write(6,*) ''
+          Write(6,*) '  Combined: Strict G_r = Q_r for all r and tau!'
           Write(6,*) '============================================================'
 
         End Subroutine Setup_Gauss_constraint
@@ -1414,6 +1449,100 @@
           Compute_Star_Product_X = X_r
 
         End Function Compute_Star_Product_X
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Computes Delta S_time_plaq when a sigma link (gauge field) is flipped.
+!> This is the star-product time-coupling contribution to strict Gauss.
+!>
+!> S_time_plaq = -K_time * sum_{r,n} X_r(n) * X_r(n+1)
+!> where X_r = prod_{b in +r} sigma^z_b (star product at site r)
+!>
+!> When sigma on link b is flipped at time nt, it affects:
+!>   - Star products at the two endpoints of link b
+!>   - The coupling between nt and nt-1, and between nt and nt+1
+!>
+!> @param[IN] n       Integer, field index of the sigma link being flipped
+!> @param[IN] nt      Integer, time slice
+!> @return Delta_S = S_new - S_old
+!--------------------------------------------------------------------
+        Real (Kind=Kind(0.d0)) Function Compute_Delta_S_Star_Time(n, nt)
+
+          Implicit none
+          Integer, Intent(IN) :: n, nt
+          
+          ! Local
+          Integer :: site_r, orientation, I_mx, I_my, J
+          Integer :: nt_p1, nt_m1
+          Integer :: X_r_old, X_r_new, X_rp_old, X_rp_new
+          Integer :: X_r_ntp1, X_r_ntm1, X_rp_ntp1, X_rp_ntm1
+          Real (Kind=Kind(0.d0)) :: S_old, S_new
+          
+          ! If not using strict Gauss or no gauge field, return 0
+          If (.not. UseStrictGauss .or. Abs(Ham_TZ2) < Zero) then
+             Compute_Delta_S_Star_Time = 0.d0
+             return
+          endif
+          
+          ! Get site and orientation of the link
+          site_r = Field_list_inv(n, 1)  ! site index
+          orientation = Field_list_inv(n, 2)  ! 1=+x, 2=+y
+          
+          ! Time neighbors
+          nt_p1 = nt + 1
+          If (nt_p1 > Ltrot) nt_p1 = 1  ! Periodic BC
+          nt_m1 = nt - 1
+          If (nt_m1 < 1) nt_m1 = Ltrot  ! Periodic BC
+          
+          ! Link b connects site_r to site_r+eta (J)
+          If (orientation == 1) then
+             J = Latt%nnlist(site_r, 1, 0)  ! site_r + a_x
+          else
+             J = Latt%nnlist(site_r, 0, 1)  ! site_r + a_y
+          endif
+          
+          ! Compute star products at site_r and site J (the two endpoints)
+          ! OLD values (before flip)
+          X_r_old = Compute_Star_Product_X(site_r, nt)
+          X_rp_old = Compute_Star_Product_X(J, nt)
+          
+          ! Values at adjacent time slices (these don't change)
+          X_r_ntp1 = Compute_Star_Product_X(site_r, nt_p1)
+          X_r_ntm1 = Compute_Star_Product_X(site_r, nt_m1)
+          X_rp_ntp1 = Compute_Star_Product_X(J, nt_p1)
+          X_rp_ntm1 = Compute_Star_Product_X(J, nt_m1)
+          
+          ! NEW values (after flip) - star products change sign
+          ! because one link in the star changes sign
+          X_r_new = -X_r_old
+          X_rp_new = -X_rp_old
+          
+          ! S_time_plaq = -K_time * sum X_r(n) * X_r(n+1)
+          ! Contributions from site_r:
+          !   old: -K * [X_r(nt)*X_r(nt+1) + X_r(nt-1)*X_r(nt)]
+          !   new: -K * [X_r_new*X_r(nt+1) + X_r(nt-1)*X_r_new]
+          ! Contributions from site J:
+          !   old: -K * [X_J(nt)*X_J(nt+1) + X_J(nt-1)*X_J(nt)]
+          !   new: -K * [X_J_new*X_J(nt+1) + X_J(nt-1)*X_J_new]
+          
+          S_old = -Gamma_Gauss_Sigma * ( &
+               & real(X_r_old * X_r_ntp1, kind(0.d0)) + &
+               & real(X_r_ntm1 * X_r_old, kind(0.d0)) + &
+               & real(X_rp_old * X_rp_ntp1, kind(0.d0)) + &
+               & real(X_rp_ntm1 * X_rp_old, kind(0.d0)) )
+          
+          S_new = -Gamma_Gauss_Sigma * ( &
+               & real(X_r_new * X_r_ntp1, kind(0.d0)) + &
+               & real(X_r_ntm1 * X_r_new, kind(0.d0)) + &
+               & real(X_rp_new * X_rp_ntp1, kind(0.d0)) + &
+               & real(X_rp_ntm1 * X_rp_new, kind(0.d0)) )
+          
+          Compute_Delta_S_Star_Time = S_new - S_old
+
+        End Function Compute_Delta_S_Star_Time
 
 !--------------------------------------------------------------------
 !> @author
