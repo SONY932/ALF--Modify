@@ -2965,50 +2965,26 @@
            enddo
         endif
         If ( Abs(Ham_TZ2) > Zero ) then
-           If (UseStrictGauss) then
-              ! ============================================================
-              ! For strict Gauss constraint, initialize sigma to satisfy G_r = +1
-              ! G_r = Q_r * tau_r^x * X_r, where X_r = prod_b sigma_b^z
-              ! 
-              ! With all sigma = +1, X_r = +1 for all sites.
-              ! Combined with Q_r = +1 (even sector) and tau_r^x = +1 (uniform tau),
-              ! this gives G_r = +1.
-              ! ============================================================
-              Do nt = 1, Ltrot
-                 Do I = 1, Latt%N
-                    if (mod(Latt%list(I,1) + Latt%list(I,2), 2) == 0) then
-                       Initial_field(Field_list(I,1,1),nt) = cmplx(1.d0, 0.d0, Kind(0.d0))
-                       Initial_field(Field_list(I,2,1),nt) = cmplx(1.d0, 0.d0, Kind(0.d0))
-                    endif
-                 Enddo
+           !  Start with a pi-flux state (same for Gauss and non-Gauss).
+           !  The Gauss constraint will be enforced through the weight function,
+           !  not through initial configuration.
+           Do nt = 1,Ltrot
+              Do I = 1, Latt%N
+                 if (mod( Latt%list(i,1) + latt%list(i,2), 2 ) == 0 ) then
+                    Initial_field(Field_list(I,1,1),nt) =  cmplx( 1.d0, 0.d0, Kind(0.d0))
+                    Initial_field(Field_list(I,2,1),nt) =  cmplx(-1.d0, 0.d0, Kind(0.d0))
+                 else
+                    Initial_field(Field_list(I,1,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
+                    Initial_field(Field_list(I,2,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
+                 endif
               Enddo
-              Write(6,*) 'Gauge fields initialized to +1 (Gauss constraint satisfied)'
-           else
-              !  Start with a pi-flux state (original behavior).
-              Do nt = 1,Ltrot
-                 Do I = 1, Latt%N
-                    if (mod( Latt%list(i,1) + latt%list(i,2), 2 ) == 0 ) then
-                       Initial_field(Field_list(I,1,1),nt) =  cmplx( 1.d0, 0.d0, Kind(0.d0))
-                       Initial_field(Field_list(I,2,1),nt) =  cmplx(-1.d0, 0.d0, Kind(0.d0))
-                    else
-                       Initial_field(Field_list(I,1,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
-                       Initial_field(Field_list(I,2,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
-                    endif
-                 Enddo
-              Enddo
-           endif
+           Enddo
         endif
         If ( Abs(Ham_T) > Zero ) then
            Do nt = 1,Ltrot
               Do I = 1,Latt%N
-                 If (UseStrictGauss) then
-                    ! For Gauss constraint, initialize tau = +1 uniformly
-                    ! This ensures tau_r^x = tau(t)*tau(t+1) = +1
-                    Isigma(I) = 1
-                 else
-                    Isigma(I) = 1
-                    if ( ranf_wrap()  > 0.5D0 ) Isigma(I)  = -1
-                 endif
+                 Isigma(I) = 1
+                 if ( ranf_wrap()  > 0.5D0 ) Isigma(I)  = -1
               enddo
               Do I = 1,Latt%N
                  Do n_orientation = 1,2
@@ -3030,9 +3006,6 @@
                  endif
               enddo
            enddo
-           If (UseStrictGauss) then
-              Write(6,*) 'Matter fields initialized to +1 (tau_r^x = +1)'
-           endif
         endif
         
         ! ============================================================
