@@ -1295,38 +1295,11 @@
 !> @return Weight ratio for lambda flip
 !--------------------------------------------------------------------
         Real (Kind=Kind(0.d0)) Function Compute_Gauss_Weight_Ratio_Lambda_PRX(I)
-
+          ! DEPRECATED: This function is no longer used.
+          ! Lambda is not an MC variable after PRX A6 summation.
           Implicit none
           Integer, Intent(IN) :: I
-          
-          Integer :: tau_z_0, tau_z_M1, lambda_old
-          Real (Kind=Kind(0.d0)) :: exponent
-          Real (Kind=Kind(0.d0)), parameter :: exp_max = 200.d0  ! Prevent overflow
-          
-          If (.not. UseStrictGauss) then
-             Compute_Gauss_Weight_Ratio_Lambda_PRX = 1.d0
-             return
-          endif
-          
-          tau_z_0  = Get_Tau_Z_At_Time_0(I)
-          tau_z_M1 = Get_Tau_Z_At_Time_M1(I)
-          lambda_old = lambda_field(I)
-          
-          ! R = exp(-2 * gamma * tau_z(i,0) * tau_z(i,M-1) * lambda_old)
-          ! Note the NEGATIVE sign: this is W_new / W_old
-          exponent = -2.d0 * Gamma_Gauss * real(tau_z_0 * tau_z_M1 * lambda_old, kind(0.d0))
-          
-          ! Numerical stability: cap exponent to avoid overflow/underflow
-          If (exponent > exp_max) then
-             ! R is very large, flip will definitely be accepted
-             Compute_Gauss_Weight_Ratio_Lambda_PRX = exp(exp_max)
-          elseif (exponent < -exp_max) then
-             ! R is very small, flip will definitely be rejected
-             Compute_Gauss_Weight_Ratio_Lambda_PRX = 0.d0
-          else
-             Compute_Gauss_Weight_Ratio_Lambda_PRX = exp(exponent)
-          endif
-
+          Compute_Gauss_Weight_Ratio_Lambda_PRX = 1.d0
         End Function Compute_Gauss_Weight_Ratio_Lambda_PRX
 
 !--------------------------------------------------------------------
@@ -1768,28 +1741,10 @@
 !> @return weight ratio for lambda flip
 !--------------------------------------------------------------------
         Real (Kind=Kind(0.d0)) Function S0_Lambda_Flip(I, nt)
-
+          ! DEPRECATED: Lambda is not an MC variable.
           Implicit none
-          
           Integer, Intent(IN) :: I, nt
-          
-          ! Local
-          Integer :: X_r, lambda_old
-          Real (Kind=Kind(0.d0)) :: Pi
-          
-          Pi = acos(-1.d0)
-          
-          ! For the auxiliary field lambda, there is no intrinsic action
-          ! The weight comes entirely from the fermion determinant
-          ! When we flip lambda -> -lambda, the phase factor changes:
-          ! exp(i * lambda * pi/2 * X_r) -> exp(-i * lambda * pi/2 * X_r)
-          ! 
-          ! The ratio of phases is exp(-i * lambda * pi * X_r)
-          ! This is purely a phase, so S0_Lambda_Flip = 1.0
-          ! The actual acceptance probability comes from the fermion determinant
-          
           S0_Lambda_Flip = 1.d0
-
         End Function S0_Lambda_Flip
 
 !--------------------------------------------------------------------
@@ -1807,32 +1762,11 @@
 !> @param[IN]  N_dim     Integer, matrix dimension
 !--------------------------------------------------------------------
         Subroutine Construct_P_Lambda_Matrix(P_lambda, N_dim)
-
+          ! DEPRECATED: Lambda is not an MC variable.
           Implicit none
-          
           Complex (Kind=Kind(0.d0)), Intent(OUT) :: P_lambda(:,:)
           Integer, Intent(IN) :: N_dim
-          
-          ! Local
-          Integer :: I
-          
-          ! Initialize to zero
-          P_lambda = cmplx(0.d0, 0.d0, kind(0.d0))
-          
-          ! Set diagonal elements: P_ii = lambda_i
-          ! For sites 1 to Latt%N (assuming N_dim >= Latt%N)
-          Do I = 1, min(Latt%N, N_dim)
-             P_lambda(I, I) = cmplx(real(lambda_field(I), kind(0.d0)), 0.d0, kind(0.d0))
-          Enddo
-          
-          ! If there are two spin degrees of freedom (N_dim = 2*Latt%N),
-          ! set the second block as well
-          If (N_dim >= 2 * Latt%N) then
-             Do I = 1, Latt%N
-                P_lambda(I + Latt%N, I + Latt%N) = cmplx(real(lambda_field(I), kind(0.d0)), 0.d0, kind(0.d0))
-             Enddo
-          Endif
-
+          P_lambda = cmplx(1.d0, 0.d0, kind(0.d0))
         End Subroutine Construct_P_Lambda_Matrix
 
 !--------------------------------------------------------------------
@@ -1847,35 +1781,11 @@
 !> @param[IN]    N_dim Integer, matrix dimension
 !--------------------------------------------------------------------
         Subroutine Apply_P_Lambda_To_Matrix(B, N_dim)
-
+          ! DEPRECATED: Lambda is not an MC variable.
           Implicit none
-          
           Complex (Kind=Kind(0.d0)), Intent(INOUT) :: B(:,:)
           Integer, Intent(IN) :: N_dim
-          
-          ! Local
-          Integer :: I, J
-          Real (Kind=Kind(0.d0)) :: lambda_i
-          
-          ! P[lambda] * B: multiply row I by lambda_i
-          ! For single spin or first block
-          Do I = 1, min(Latt%N, N_dim)
-             lambda_i = real(lambda_field(I), kind(0.d0))
-             Do J = 1, N_dim
-                B(I, J) = lambda_i * B(I, J)
-             Enddo
-          Enddo
-          
-          ! For second spin block if present
-          If (N_dim >= 2 * Latt%N) then
-             Do I = 1, Latt%N
-                lambda_i = real(lambda_field(I), kind(0.d0))
-                Do J = 1, N_dim
-                   B(I + Latt%N, J) = lambda_i * B(I + Latt%N, J)
-                Enddo
-             Enddo
-          Endif
-
+          ! Do nothing - no P[lambda] modification
         End Subroutine Apply_P_Lambda_To_Matrix
 
 !--------------------------------------------------------------------
@@ -1898,34 +1808,11 @@
 !> @return R_ferm (complex determinant ratio)
 !--------------------------------------------------------------------
         Complex (Kind=Kind(0.d0)) Function Compute_Lambda_Flip_Fermion_Ratio(I, G, B, N_dim)
-
+          ! DEPRECATED: Lambda is not an MC variable.
           Implicit none
-          
           Integer, Intent(IN) :: I, N_dim
           Complex (Kind=Kind(0.d0)), Intent(IN) :: G(:,:), B(:,:)
-          
-          ! Local
-          Integer :: J
-          Integer :: lambda_old
-          Complex (Kind=Kind(0.d0)) :: BG_ii
-          
-          If (.not. UseStrictGauss) then
-             Compute_Lambda_Flip_Fermion_Ratio = cmplx(1.d0, 0.d0, kind(0.d0))
-             return
-          endif
-          
-          lambda_old = lambda_field(I)
-          
-          ! Compute (B*G)_{ii} = sum_j B(i,j) * G(j,i)
-          BG_ii = cmplx(0.d0, 0.d0, kind(0.d0))
-          Do J = 1, N_dim
-             BG_ii = BG_ii + B(I, J) * G(J, I)
-          Enddo
-          
-          ! R_ferm = 1 - 2 * lambda_old * (B*G)_{ii}
-          Compute_Lambda_Flip_Fermion_Ratio = cmplx(1.d0, 0.d0, kind(0.d0)) - &
-               & 2.d0 * real(lambda_old, kind(0.d0)) * BG_ii
-
+          Compute_Lambda_Flip_Fermion_Ratio = cmplx(1.d0, 0.d0, kind(0.d0))
         End Function Compute_Lambda_Flip_Fermion_Ratio
 
 !--------------------------------------------------------------------
@@ -1945,53 +1832,13 @@
 !> @param[IN]    R_ferm Complex, the fermion ratio (1 + w^T*G*u)
 !--------------------------------------------------------------------
         Subroutine Update_Green_Sherman_Morrison_Lambda(G, I, B, N_dim, R_ferm)
-
+          ! DEPRECATED: Lambda is not an MC variable.
           Implicit none
-          
           Complex (Kind=Kind(0.d0)), Intent(INOUT) :: G(:,:)
           Integer, Intent(IN) :: I, N_dim
           Complex (Kind=Kind(0.d0)), Intent(IN) :: B(:,:)
           Complex (Kind=Kind(0.d0)), Intent(IN) :: R_ferm
-          
-          ! Local
-          Integer :: J, K
-          Integer :: lambda_old
-          Complex (Kind=Kind(0.d0)) :: u_scalar
-          Complex (Kind=Kind(0.d0)), allocatable :: Gu(:), wG(:)
-          
-          If (abs(R_ferm) < 1.d-14) then
-             Write(6,*) 'WARNING: Update_Green_Sherman_Morrison_Lambda: R_ferm ~ 0'
-             return
-          endif
-          
-          lambda_old = lambda_field(I)
-          u_scalar = cmplx(-2.d0 * real(lambda_old, kind(0.d0)), 0.d0, kind(0.d0))
-          
-          Allocate(Gu(N_dim), wG(N_dim))
-          
-          ! Compute G*u: (G*u)_k = G(k,i) * u_scalar
-          Do K = 1, N_dim
-             Gu(K) = G(K, I) * u_scalar
-          Enddo
-          
-          ! Compute w^T*G: (w^T*G)_j = sum_k B(i,k) * G(k,j)
-          Do J = 1, N_dim
-             wG(J) = cmplx(0.d0, 0.d0, kind(0.d0))
-             Do K = 1, N_dim
-                wG(J) = wG(J) + B(I, K) * G(K, J)
-             Enddo
-          Enddo
-          
-          ! Update: G_new = G - (Gu * wG^T) / R_ferm
-          ! G_new(k,j) = G(k,j) - Gu(k) * wG(j) / R_ferm
-          Do K = 1, N_dim
-             Do J = 1, N_dim
-                G(K, J) = G(K, J) - Gu(K) * wG(J) / R_ferm
-             Enddo
-          Enddo
-          
-          Deallocate(Gu, wG)
-
+          ! Do nothing
         End Subroutine Update_Green_Sherman_Morrison_Lambda
 
 !--------------------------------------------------------------------
@@ -2116,40 +1963,11 @@
 !> @param [IN] nf   Integer, flavor index
 !--------------------------------------------------------------------
         Subroutine Apply_P_Lambda_To_B_Right(B_slice, nf)
-
+          ! DEPRECATED: Lambda is not an MC variable.
           Implicit none
-          
           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: B_slice(:,:)
           Integer, INTENT(IN) :: nf
-          
-          ! Local
-          Integer :: I, J, N_dim
-          Real (Kind=Kind(0.d0)) :: lambda_j
-          
-          If (.not. UseStrictGauss) return
-          
-          N_dim = size(B_slice, 2)
-          
-          ! Apply P[lambda] transformation to B-matrix (right multiplication)
-          ! B'(:, j) = B(:, j) * lambda_j
-          
-          Do J = 1, min(Latt%N, N_dim)
-             lambda_j = real(lambda_field(J), kind(0.d0))
-             Do I = 1, size(B_slice, 1)
-                B_slice(I, J) = B_slice(I, J) * lambda_j
-             Enddo
-          Enddo
-          
-          ! For two spin degrees of freedom (spin-up at j, spin-down at j+N)
-          If (N_dim >= 2 * Latt%N) then
-             Do J = 1, Latt%N
-                lambda_j = real(lambda_field(J), kind(0.d0))
-                Do I = 1, size(B_slice, 1)
-                   B_slice(I, J + Latt%N) = B_slice(I, J + Latt%N) * lambda_j
-                Enddo
-             Enddo
-          Endif
-
+          ! Do nothing
         End Subroutine Apply_P_Lambda_To_B_Right
 
 !--------------------------------------------------------------------
@@ -2169,85 +1987,12 @@
 !> @param [OUT] R_ferm  Complex, fermion determinant ratio
 !--------------------------------------------------------------------
         Subroutine Lambda_Ferm_Ratio_site(i_site, G, R_ferm)
-          !
-          ! ============================================================
-          ! FERMION DETERMINANT RATIO for lambda flip at site i
-          ! ============================================================
-          ! From G = (1 + P_old * B)^{-1}, we have:
-          !   G * (1 + P_old * B) = I
-          !   G + G * P_old * B = I
-          !   G * P_old * B = I - G
-          !   B * G = P_old^{-1} * (I - G) = P_old * (I - G)  (since P^{-1} = P)
-          !   (B * G)_{ii} = lambda_old * (1 - G_{ii})
-          !
-          ! Using matrix determinant lemma for rank-1 update:
-          !   det(1 + P_new*B) / det(1 + P_old*B) = 1 + v^T G u
-          ! where ΔP = P_new - P_old = -2*lambda_old * e_i * e_i^T
-          !
-          !   R_ferm = 1 - 2*lambda_old * (B*G)_{ii}
-          !          = 1 - 2*lambda_old * lambda_old * (1 - G_{ii})
-          !          = 1 - 2*(1 - G_{ii})  (since lambda_old^2 = 1)
-          !          = 2*G_{ii} - 1
-          !
-          ! CRITICAL: The lambda_old factors CANCEL OUT because:
-          !   - One factor comes from ΔP = -2*lambda_old * ...
-          !   - One factor comes from (B*G)_{ii} = lambda_old * (1-G_{ii})
-          !   - Product: lambda_old^2 = 1
-          !
-          ! For SU(N) symmetric systems:
-          !   R_ferm_total = R_single^N_SUN
-          ! ============================================================
-          
+          ! DEPRECATED: Lambda is not an MC variable.
           Implicit none
-          
           Integer, INTENT(IN) :: i_site
           Complex (Kind=Kind(0.d0)), INTENT(IN) :: G(:,:)
           Complex (Kind=Kind(0.d0)), INTENT(OUT) :: R_ferm
-          
-          ! Local
-          Integer :: N, i_up, i_down
-          Complex (Kind=Kind(0.d0)) :: R_single_up, R_single_down
-          
-          ! NOTE: P[lambda] modification to B-matrix is DISABLED.
-          ! Since P is not applied, the fermion determinant ratio is always 1.
-          ! The lambda update uses bosonic weight only.
           R_ferm = cmplx(1.d0, 0.d0, kind(0.d0))
-          return
-          
-          ! ---- ORIGINAL CODE (for when P[lambda] is enabled) ----
-          If (.not. UseStrictGauss) then
-             R_ferm = cmplx(1.d0, 0.d0, kind(0.d0))
-             return
-          Endif
-          
-          N = size(G, 1)
-          
-          ! Site indices in the full G matrix
-          i_up = i_site
-          i_down = i_site + N_sites_lambda
-          
-          ! CORRECT formula: R = 2*G_{ii} - 1 for EACH spin component
-          ! P[lambda] acts on both spin-up and spin-down at the same site
-          ! Total ratio = R_up * R_down (independent spin blocks)
-          
-          ! Spin-up contribution
-          R_single_up = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_up, i_up) - &
-               cmplx(1.d0, 0.d0, kind(0.d0))
-          
-          ! Spin-down contribution (if present)
-          If (N_spin_lambda == 2 .and. i_down <= N) then
-             R_single_down = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_down, i_down) - &
-                  cmplx(1.d0, 0.d0, kind(0.d0))
-             R_ferm = R_single_up * R_single_down
-          else
-             R_ferm = R_single_up
-          endif
-          
-          ! For SU(N) symmetry, total ratio is R^{N_SUN}
-          If (N_SUN > 1) then
-             R_ferm = R_ferm ** N_SUN
-          endif
-          
         End Subroutine Lambda_Ferm_Ratio_site
 
 !--------------------------------------------------------------------
@@ -2266,92 +2011,12 @@
 !> @param [IN] R_ferm   Complex, fermion determinant ratio (for consistency check)
 !--------------------------------------------------------------------
         Subroutine Lambda_Update_Green_site(i_site, G, R_ferm)
-          !
-          ! ============================================================
-          ! Sherman-Morrison update for lambda flip at site i
-          ! ============================================================
-          ! For Z2_Matter model with two spin species:
-          ! - G has dimension 2*N_sites x 2*N_sites (spin-up and spin-down blocks)
-          ! - P[lambda] acts on BOTH spin species at the same site
-          ! - We need TWO rank-1 updates: one for spin-up, one for spin-down
-          !
-          ! The SM update formula for each spin block:
-          !   G_new = G + 2 * G[:,i] ⊗ (e_i - G_{i,:}) / R_single
-          !
-          ! where i is the site index in each spin block.
-          ! ============================================================
-          
+          ! DEPRECATED: Lambda is not an MC variable.
           Implicit none
-          
           Integer, INTENT(IN) :: i_site
           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: G(:,:)
           Complex (Kind=Kind(0.d0)), INTENT(IN) :: R_ferm
-          
-          ! Local
-          Integer :: N, I, J, i_up, i_down
-          Complex (Kind=Kind(0.d0)) :: R_single_up, R_single_down, coeff
-          Complex (Kind=Kind(0.d0)), allocatable :: G_col(:), delta_row(:)
-          
-          If (.not. UseStrictGauss) return
-          
-          N  = size(G, 1)
-          
-          ! Site indices in the full G matrix
-          ! G is organized as: [spin-up block | spin-down block] for both rows and cols
-          i_up = i_site
-          i_down = i_site + N_sites_lambda
-          
-          ! Skip if indices are out of bounds (shouldn't happen)
-          If (i_up > N .or. (N_spin_lambda == 2 .and. i_down > N)) return
-          
-          Allocate(G_col(N), delta_row(N))
-          
-          ! ============================================================
-          ! Update for spin-up block
-          ! ============================================================
-          R_single_up = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_up, i_up) - &
-               cmplx(1.d0, 0.d0, kind(0.d0))
-          
-          If (abs(R_single_up) > 1.d-14) then
-             G_col(:) = G(:, i_up)
-             Do J = 1, N
-                delta_row(J) = -G(i_up, J)
-             Enddo
-             delta_row(i_up) = delta_row(i_up) + cmplx(1.d0, 0.d0, kind(0.d0))
-             
-             coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_single_up
-             Do J = 1, N
-                Do I = 1, N
-                   G(I, J) = G(I, J) + coeff * G_col(I) * delta_row(J)
-                Enddo
-             Enddo
-          Endif
-          
-          ! ============================================================
-          ! Update for spin-down block (if present)
-          ! ============================================================
-          If (N_spin_lambda == 2 .and. i_down <= N) then
-             R_single_down = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_down, i_down) - &
-                  cmplx(1.d0, 0.d0, kind(0.d0))
-             
-             If (abs(R_single_down) > 1.d-14) then
-                G_col(:) = G(:, i_down)
-                Do J = 1, N
-                   delta_row(J) = -G(i_down, J)
-                Enddo
-                delta_row(i_down) = delta_row(i_down) + cmplx(1.d0, 0.d0, kind(0.d0))
-                
-                coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_single_down
-                Do J = 1, N
-                   Do I = 1, N
-                      G(I, J) = G(I, J) + coeff * G_col(I) * delta_row(J)
-                   Enddo
-                Enddo
-             Endif
-          Endif
-          
-          Deallocate(G_col, delta_row)
-          
+          ! Do nothing
         End Subroutine Lambda_Update_Green_site
 
 !--------------------------------------------------------------------
@@ -2373,79 +2038,13 @@
 !> This ensures the sign problem is correctly tracked.
 !--------------------------------------------------------------------
         Subroutine Sweep_Lambda(G, Phase)
-          
+          ! DEPRECATED: Lambda is not an MC variable.
+          ! After PRX A6 lambda summation, there is no lambda field to sample.
+          ! The Gauss constraint is purely through tau boundary coupling.
           Implicit none
-          
           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: G(:,:)
           Complex (Kind=Kind(0.d0)), INTENT(INOUT), optional :: Phase
-          
-          ! Local
-          Integer :: i_site, lambda_old, I
-          Real (Kind=Kind(0.d0)) :: R_bose, Weight, rand_val
-          Complex (Kind=Kind(0.d0)) :: R_ferm, R_tot, Phase_ratio, R_single
-          Integer :: n_accept
-          Integer, save :: sweep_count = 0
-          
-          If (.not. UseStrictGauss) return
-          
-          sweep_count = sweep_count + 1
-          n_accept = 0
-          
-          ! Sweep over all sites (NOT time slices!)
-          Do i_site = 1, N_sites_lambda
-             lambda_old = lambda_field(i_site)
-             
-             ! --- Bosonic weight ratio (PRX A6) ---
-             R_bose = Compute_Gauss_Weight_Ratio_Lambda_PRX(i_site)
-             
-             ! --- Fermionic determinant ratio (Sherman-Morrison) ---
-             Call Lambda_Ferm_Ratio_site(i_site, G, R_ferm)
-             
-             ! --- Total ratio (complex) ---
-             R_tot = cmplx(R_bose, 0.d0, kind(0.d0)) * R_ferm
-             
-             ! --- Metropolis acceptance using |R_tot| ---
-             ! Sign/phase is accumulated separately after acceptance
-             Weight = abs(R_tot)
-             Call random_number(rand_val)
-             
-             If (rand_val < Weight) then
-                ! Accept the flip
-                lambda_field(i_site) = -lambda_old
-                n_accept = n_accept + 1
-                
-                ! Accumulate phase/sign: Phase = Phase * R_tot / |R_tot|
-                If (present(Phase) .and. Weight > 0.d0) then
-                   Phase_ratio = R_tot / cmplx(Weight, 0.d0, kind(0.d0))
-                   Phase = Phase * Phase_ratio
-                Endif
-                
-                ! Sherman-Morrison update of Green function
-                ! NOTE: SM update is DISABLED because CGR is called after Sweep_Lambda
-                ! in main.F90 to rebuild G with the new lambda configuration.
-                ! The SM formula has issues - G difference > 10 threshold.
-                ! TODO: Debug the SM formula if performance is critical.
-                ! Call Lambda_Update_Green_site(i_site, G, R_ferm)
-                
-                ! Update B_lambda_slice for consistency (not used if SM disabled)
-                B_lambda_slice(i_site, :) = -B_lambda_slice(i_site, :)
-                If (N_spin_lambda == 2 .and. dimF_lambda >= 2 * N_sites_lambda) then
-                   B_lambda_slice(i_site + N_sites_lambda, :) = &
-                        -B_lambda_slice(i_site + N_sites_lambda, :)
-                Endif
-             Endif
-          Enddo
-          
-          ! Diagnostic output (first sweep only)
-          If (sweep_count == 1) then
-             Write(6,'(A,I2,A,I2)') ' Sweep_Lambda: accepted ', n_accept, ' of ', N_sites_lambda
-             ! More detailed diagnostics
-             Write(6,'(A,ES12.4,A,ES12.4)') '   Sample R_bose=', R_bose, ' |R_ferm|=', abs(R_ferm)
-             R_single = cmplx(2.d0, 0.d0, kind(0.d0)) * G(1, 1) - &
-                  cmplx(1.d0, 0.d0, kind(0.d0))
-             Write(6,'(A,ES12.4,A,ES12.4)') '   G(1,1)=', real(G(1,1)), ' R_single=', abs(R_single)
-          Endif
-          
+          ! Do nothing
         End Subroutine Sweep_Lambda
 
 !--------------------------------------------------------------------
