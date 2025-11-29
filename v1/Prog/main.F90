@@ -1026,8 +1026,9 @@ Program Main
                      ! Pass Phase to accumulate sign correctly
                      Call ham%Sweep_Lambda(GR(:,:,nf), Phase)
                   Enddo
-                  ! IMPORTANT: Since SM update is disabled, rebuild G with new lambda
-                  ! This is inefficient but ensures correctness
+                  ! Rebuild G with new lambda configuration using CGR
+                  ! NOTE: SM update in Sweep_Lambda is disabled due to numerical issues
+                  ! CGR ensures numerical stability at the cost of performance
                   Phase_array = cmplx(1.d0, 0.d0, kind(0.D0))
                   Do nf_eff = 1, N_FL_eff
                      nf = Calc_Fl_map(nf_eff)

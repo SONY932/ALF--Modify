@@ -9,37 +9,37 @@ Lattice_type = "Square"
 Model        = "Z2_Matter"
 /
 
-&VAR_Z2_Matter
-N_SUN          = 2
-ham_T          = 1.0d0
-ham_TZ2        = 1.0d0
-Ham_chem       = 0.0d0
-Ham_U          = 0.0d0
-Ham_J          = 1.0d0
-Ham_K          = 1.0d0
-Ham_h          = 1.0d0
-Ham_g          = 1.0d0
-Dtau           = 0.1d0
-Beta           = 2.0d0
-Projector      = .false.
-Theta          = 0.0d0
-N_part         = -1
-UseStrictGauss = .true.
-GaussSector    = "even"
+&VAR_Model_Generic
+Checkerboard = .T.
+Symm         = .T.
+N_SUN        = 1
+N_FL         = 2
+Dtau         = 0.05d0
+Beta         = 2.d0
+Projector    = .F.
 /
 
 &VAR_QMC
 Nwrap                = 5
 NSweep               = 100
-NBin                 = 2
-Ltau                 = 0
+NBin                 = 10
 CPU_MAX              = 0.0
-Propose_S0           = .F.
-Global_moves         = .F.
-Sequential           = .T.
 /
 
 &VAR_errors
-n_skip  = 0
+n_skip  = 1
 N_rebin = 1
+/
+
+&VAR_Z2_Matter
+ham_T          = 1.0
+ham_TZ2        = 0.5
+ham_chem       = 0.1
+ham_U          = 0.0
+Ham_J          = 0.0
+Ham_K          = 0.5
+Ham_h          = 0.2
+Ham_g          = 0.0
+UseStrictGauss = .T.
+GaussSector    = "even"
 /

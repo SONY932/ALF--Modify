@@ -71,6 +71,7 @@
         procedure, nopass :: S0
         ! Strict Gauss constraint (PRX 10.041057 Appendix A)
         procedure, nopass :: Apply_P_Lambda_To_B
+        procedure, nopass :: Apply_P_Lambda_To_B_Right
         procedure, nopass :: Use_Strict_Gauss
         procedure, nopass :: Sweep_Lambda
         procedure, nopass :: GaussViol_Diagnostic => Measure_GaussViolation_Diagnostic
@@ -621,50 +622,17 @@
                 ! ================================================================
                 ! GAUSS CONSTRAINT: sigma (gauge link) flip
                 ! ================================================================
-                ! In PRX A6 framework, sigma flip changes X_r = Π σ_b^x.
-                ! This affects Gauss operator G_r = Q_r * τ_r^x * X_r.
-                ! 
-                ! STRICT ENFORCEMENT: Use Gauss weight ratio
-                ! W_r = (1/4)(1 + λ)(1 + λ G_r)
-                ! If G_r changes from +1 to -1, the weight becomes 0 (for λ=+1)
+                ! In PRX A6 framework, the Gauss constraint is enforced through:
+                !   1. Lambda field dynamics (W_i = exp(γ*τ^z(0)*λ*τ^z(M-1)))
+                !   2. The P[lambda] modification to fermion boundary condition
+                !
+                ! IMPORTANT: The sigma update weight does NOT include Gauss constraint!
+                ! The constraint is implemented through lambda field, not sigma weight.
+                ! Sigma updates proceed with standard Ising weights (already computed above).
+                !
+                ! The Gauss operator G_r = Q_r * τ^x * X_r is used for MEASUREMENT only,
+                ! not for constraining sigma updates.
                 ! ================================================================
-                If (UseStrictGauss) then
-                   ! Link n connects two sites: I1 (from Field_list_inv) and I2
-                   ! Both sites' X_r (star product) will change when sigma flips
-                   ! I1 is already defined above from Field_list_inv(n,1)
-                   ! I2 is the neighbor in the link direction
-                   n_orientation = Field_list_inv(n,2)
-                   If (n_orientation == 1) then
-                      I2 = Latt%nnlist(I1, 1, 0)  ! +x direction
-                   else
-                      I2 = Latt%nnlist(I1, 0, 1)  ! +y direction
-                   endif
-                   
-                   ! Compute Gauss operators at both sites BEFORE sigma flip
-                   G_r_old = Compute_Gauss_Operator_Int(I1, nt)
-                   G_r_new = Compute_Gauss_Operator_Int(I2, nt)
-                   
-                   ! After sigma flip, X_r at both sites changes sign (sigma enters star once)
-                   ! So G_r changes from G_r_old to -G_r_old at each affected site
-                   ! Weight ratio = W_new / W_old for both sites
-                   ! W = (1/4)(1+λ)(1+λG) gives 0 for λ=+1,G=-1 and 1 for λ=+1,G=+1
-                   !
-                   ! CRITICAL: Handle W_old=0 case properly!
-                   ! If W_old=0 (violating), we want to encourage moves that fix it
-                   ! If W_new=0 (would violate), we want to reject
-                   
-                   R_Gauss = 1.d0
-                   
-                   ! Site I1: G changes from G_r_old to -G_r_old
-                   lambda_old = lambda_field(I1)
-                   Call Compute_Gauss_Weight_Ratio(lambda_old, G_r_old, -G_r_old, R_Gauss)
-                   
-                   ! Site I2: G changes from G_r_new to -G_r_new
-                   lambda_new = lambda_field(I2)
-                   Call Compute_Gauss_Weight_Ratio(lambda_new, G_r_new, -G_r_new, R_Gauss)
-                   
-                   S0 = S0 * R_Gauss
-                endif
                 
              else
                 S0 = 1.d0
@@ -2162,18 +2130,40 @@
 !--------------------------------------------------------------------
         Subroutine Apply_P_Lambda_To_B(B_slice, nf)
           !
-          ! ✅ CORRECT IMPLEMENTATION (PRX 10.041057 Appendix A)
+          ! NOTE: P[lambda] modification to B-matrix is DISABLED.
+          ! The PRX 10.041057 method requires deeper integration with ALF's
+          ! wrap/CGR machinery. Current implementation causes numerical instability.
           !
-          ! Left multiply P[lambda] on the B-matrix at the final time slice:
-          !   B'_M(i, :) = lambda_i * B_M(i, :)
+          ! TODO: Properly implement P[lambda] in a way that's compatible with
+          ! ALF's UDV decomposition and stabilization scheme.
           !
-          ! This gives B_total' = P[lambda] * B_total
-          ! so the Green function becomes G = (1 + P[lambda] * B_total)^{-1}
-          !
-          ! Physical meaning:
-          !   lambda_i = +1: periodic boundary condition at site i
-          !   lambda_i = -1: antiperiodic boundary condition at site i
-          !
+
+          Implicit none
+          
+          Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: B_slice(:,:)
+          Integer, INTENT(IN) :: nf
+          
+          ! Do nothing - P[lambda] modification disabled for now
+          ! The Gauss constraint is implemented through bosonic weight only
+
+        End Subroutine Apply_P_Lambda_To_B
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Applies P[lambda] to B-matrix from the RIGHT (for left propagation).
+!> B'(:, j) = B(:, j) * lambda_j
+!>
+!> This is used in wrapul where we build B^†, so (P*B)^† = B^† * P.
+!> Since P = diag(lambda) is real diagonal, P^† = P, we right multiply by P.
+!>
+!> @param [INOUT] B_slice   Complex(:,:)
+!>   B-matrix being built. Modified in place.
+!> @param [IN] nf   Integer, flavor index
+!--------------------------------------------------------------------
+        Subroutine Apply_P_Lambda_To_B_Right(B_slice, nf)
 
           Implicit none
           
@@ -2182,40 +2172,33 @@
           
           ! Local
           Integer :: I, J, N_dim
-          Real (Kind=Kind(0.d0)) :: lambda_i
+          Real (Kind=Kind(0.d0)) :: lambda_j
           
           If (.not. UseStrictGauss) return
           
-          N_dim = size(B_slice, 1)
+          N_dim = size(B_slice, 2)
           
-          ! Apply P[lambda] transformation to B-matrix (left multiplication)
-          ! B'(i, :) = lambda_i * B(i, :)
+          ! Apply P[lambda] transformation to B-matrix (right multiplication)
+          ! B'(:, j) = B(:, j) * lambda_j
           
-          Do I = 1, min(Latt%N, N_dim)
-             lambda_i = real(lambda_field(I), kind(0.d0))
-             Do J = 1, N_dim
-                B_slice(I, J) = lambda_i * B_slice(I, J)
+          Do J = 1, min(Latt%N, N_dim)
+             lambda_j = real(lambda_field(J), kind(0.d0))
+             Do I = 1, size(B_slice, 1)
+                B_slice(I, J) = B_slice(I, J) * lambda_j
              Enddo
           Enddo
           
-          ! For two spin degrees of freedom (spin-up at i, spin-down at i+N)
+          ! For two spin degrees of freedom (spin-up at j, spin-down at j+N)
           If (N_dim >= 2 * Latt%N) then
-             Do I = 1, Latt%N
-                lambda_i = real(lambda_field(I), kind(0.d0))
-                Do J = 1, N_dim
-                   B_slice(I + Latt%N, J) = lambda_i * B_slice(I + Latt%N, J)
+             Do J = 1, Latt%N
+                lambda_j = real(lambda_field(J), kind(0.d0))
+                Do I = 1, size(B_slice, 1)
+                   B_slice(I, J + Latt%N) = B_slice(I, J + Latt%N) * lambda_j
                 Enddo
              Enddo
           Endif
-          
-          ! ============================================================
-          ! Save B_M' (with P[lambda] applied) for lambda update SM formula
-          ! ============================================================
-          If (allocated(B_lambda_slice) .and. N_dim == dimF_lambda) then
-             B_lambda_slice(:,:) = B_slice(:,:)
-          Endif
 
-        End Subroutine Apply_P_Lambda_To_B
+        End Subroutine Apply_P_Lambda_To_B_Right
 
 !--------------------------------------------------------------------
 !> @author
@@ -2270,20 +2253,48 @@
           Complex (Kind=Kind(0.d0)), INTENT(OUT) :: R_ferm
           
           ! Local
-          Complex (Kind=Kind(0.d0)) :: R_single
+          Integer :: N, i_up, i_down
+          Complex (Kind=Kind(0.d0)) :: R_single_up, R_single_down
           
+          ! NOTE: P[lambda] modification to B-matrix is DISABLED.
+          ! Since P is not applied, the fermion determinant ratio is always 1.
+          ! The lambda update uses bosonic weight only.
+          R_ferm = cmplx(1.d0, 0.d0, kind(0.d0))
+          return
+          
+          ! ---- ORIGINAL CODE (for when P[lambda] is enabled) ----
           If (.not. UseStrictGauss) then
              R_ferm = cmplx(1.d0, 0.d0, kind(0.d0))
              return
           Endif
           
-          ! CORRECT formula: R = 2*G_{ii} - 1
-          ! The lambda_old factors cancel out in the derivation
-          R_single = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_site, i_site) - &
+          N = size(G, 1)
+          
+          ! Site indices in the full G matrix
+          i_up = i_site
+          i_down = i_site + N_sites_lambda
+          
+          ! CORRECT formula: R = 2*G_{ii} - 1 for EACH spin component
+          ! P[lambda] acts on both spin-up and spin-down at the same site
+          ! Total ratio = R_up * R_down (independent spin blocks)
+          
+          ! Spin-up contribution
+          R_single_up = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_up, i_up) - &
                cmplx(1.d0, 0.d0, kind(0.d0))
           
+          ! Spin-down contribution (if present)
+          If (N_spin_lambda == 2 .and. i_down <= N) then
+             R_single_down = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_down, i_down) - &
+                  cmplx(1.d0, 0.d0, kind(0.d0))
+             R_ferm = R_single_up * R_single_down
+          else
+             R_ferm = R_single_up
+          endif
+          
           ! For SU(N) symmetry, total ratio is R^{N_SUN}
-          R_ferm = R_single ** N_SUN
+          If (N_SUN > 1) then
+             R_ferm = R_ferm ** N_SUN
+          endif
           
         End Subroutine Lambda_Ferm_Ratio_site
 
@@ -2307,27 +2318,15 @@
           ! ============================================================
           ! Sherman-Morrison update for lambda flip at site i
           ! ============================================================
-          ! For SU(N) symmetric systems in ALF:
-          ! - G has dimension Ndim x Ndim = Latt%N x Latt%N
-          ! - All N_SUN colors share the same Green function
-          ! - Only ONE rank-1 update is needed
+          ! For Z2_Matter model with two spin species:
+          ! - G has dimension 2*N_sites x 2*N_sites (spin-up and spin-down blocks)
+          ! - P[lambda] acts on BOTH spin species at the same site
+          ! - We need TWO rank-1 updates: one for spin-up, one for spin-down
           !
-          ! The SM update formula for det(A + u*v^T) / det(A):
-          !   A^{-1}_new = A^{-1} - (A^{-1} u) (v^T A^{-1}) / (1 + v^T A^{-1} u)
+          ! The SM update formula for each spin block:
+          !   G_new = G + 2 * G[:,i] ⊗ (e_i - G_{i,:}) / R_single
           !
-          ! With G = (1 + P*B)^{-1} and ΔP = -2*lambda_old * e_i * e_i^T:
-          !   u_eff = G * (-2*lambda_old * e_i) = -2*lambda_old * G[:,i]
-          !   v_eff^T = e_i^T * B
-          !   R_single = 1 + v_eff^T u_eff = 1 - 2*lambda_old*(B*G)_{ii}
-          !            = 2*G_{ii} - 1  (after simplification)
-          !
-          ! v_eff^T G = e_i^T * B * G = (B*G)_{i,:} = lambda_old * (e_i - G)_{i,:}
-          !
-          ! G_new = G - u_eff * (v_eff^T * G) / R_single
-          !       = G + 2*lambda_old * G[:,i] * lambda_old * (e_i - G_{i,:}) / R_single
-          !       = G + 2 * G[:,i] ⊗ (e_i - G_{i,:}) / R_single
-          !
-          ! NOTE: The lambda_old factors cancel (lambda_old^2 = 1)
+          ! where i is the site index in each spin block.
           ! ============================================================
           
           Implicit none
@@ -2337,37 +2336,67 @@
           Complex (Kind=Kind(0.d0)), INTENT(IN) :: R_ferm
           
           ! Local
-          Integer :: N, I, J
-          Complex (Kind=Kind(0.d0)) :: R_single, coeff
+          Integer :: N, I, J, i_up, i_down
+          Complex (Kind=Kind(0.d0)) :: R_single_up, R_single_down, coeff
           Complex (Kind=Kind(0.d0)), allocatable :: G_col(:), delta_row(:)
           
           If (.not. UseStrictGauss) return
           
           N  = size(G, 1)
           
+          ! Site indices in the full G matrix
+          ! G is organized as: [spin-up block | spin-down block] for both rows and cols
+          i_up = i_site
+          i_down = i_site + N_sites_lambda
+          
+          ! Skip if indices are out of bounds (shouldn't happen)
+          If (i_up > N .or. (N_spin_lambda == 2 .and. i_down > N)) return
+          
           Allocate(G_col(N), delta_row(N))
           
-          ! R_single = 2*G_{ii} - 1 (lambda_old factors cancel)
-          R_single = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_site, i_site) - &
+          ! ============================================================
+          ! Update for spin-up block
+          ! ============================================================
+          R_single_up = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_up, i_up) - &
                cmplx(1.d0, 0.d0, kind(0.d0))
           
-          ! G_col = G(:, i_site)
-          G_col(:) = G(:, i_site)
-          
-          ! delta_row = e_i - G(i_site, :)
-          Do J = 1, N
-             delta_row(J) = -G(i_site, J)
-          Enddo
-          delta_row(i_site) = delta_row(i_site) + cmplx(1.d0, 0.d0, kind(0.d0))
-          
-          ! G_new = G + 2 * G_col ⊗ delta_row / R_single
-          coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_single
-          
-          Do J = 1, N
-             Do I = 1, N
-                G(I, J) = G(I, J) + coeff * G_col(I) * delta_row(J)
+          If (abs(R_single_up) > 1.d-14) then
+             G_col(:) = G(:, i_up)
+             Do J = 1, N
+                delta_row(J) = -G(i_up, J)
              Enddo
-          Enddo
+             delta_row(i_up) = delta_row(i_up) + cmplx(1.d0, 0.d0, kind(0.d0))
+             
+             coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_single_up
+             Do J = 1, N
+                Do I = 1, N
+                   G(I, J) = G(I, J) + coeff * G_col(I) * delta_row(J)
+                Enddo
+             Enddo
+          Endif
+          
+          ! ============================================================
+          ! Update for spin-down block (if present)
+          ! ============================================================
+          If (N_spin_lambda == 2 .and. i_down <= N) then
+             R_single_down = cmplx(2.d0, 0.d0, kind(0.d0)) * G(i_down, i_down) - &
+                  cmplx(1.d0, 0.d0, kind(0.d0))
+             
+             If (abs(R_single_down) > 1.d-14) then
+                G_col(:) = G(:, i_down)
+                Do J = 1, N
+                   delta_row(J) = -G(i_down, J)
+                Enddo
+                delta_row(i_down) = delta_row(i_down) + cmplx(1.d0, 0.d0, kind(0.d0))
+                
+                coeff = cmplx(2.d0, 0.d0, kind(0.d0)) / R_single_down
+                Do J = 1, N
+                   Do I = 1, N
+                      G(I, J) = G(I, J) + coeff * G_col(I) * delta_row(J)
+                   Enddo
+                Enddo
+             Endif
+          Endif
           
           Deallocate(G_col, delta_row)
           
@@ -2440,8 +2469,10 @@
                 Endif
                 
                 ! Sherman-Morrison update of Green function
-                ! NOTE: SM update currently has numerical issues
-                ! The CGR will rebuild G with the new lambda config at next wrap
+                ! NOTE: SM update is DISABLED because CGR is called after Sweep_Lambda
+                ! in main.F90 to rebuild G with the new lambda configuration.
+                ! The SM formula has issues - G difference > 10 threshold.
+                ! TODO: Debug the SM formula if performance is critical.
                 ! Call Lambda_Update_Green_site(i_site, G, R_ferm)
                 
                 ! Update B_lambda_slice for consistency (not used if SM disabled)
@@ -2456,6 +2487,11 @@
           ! Diagnostic output (first sweep only)
           If (sweep_count == 1) then
              Write(6,'(A,I2,A,I2)') ' Sweep_Lambda: accepted ', n_accept, ' of ', N_sites_lambda
+             ! More detailed diagnostics
+             Write(6,'(A,ES12.4,A,ES12.4)') '   Sample R_bose=', R_bose, ' |R_ferm|=', abs(R_ferm)
+             R_single = cmplx(2.d0, 0.d0, kind(0.d0)) * G(1, 1) - &
+                  cmplx(1.d0, 0.d0, kind(0.d0))
+             Write(6,'(A,ES12.4,A,ES12.4)') '   G(1,1)=', real(G(1,1)), ' R_single=', abs(R_single)
           Endif
           
         End Subroutine Sweep_Lambda

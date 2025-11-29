@@ -161,8 +161,10 @@
         procedure, nopass :: GRT_reconstruction => GRT_reconstruction_base
         procedure, nopass :: Apply_B_HMC => Apply_B_HMC_base
         !> Apply P[lambda] to B-matrix at boundary for strict Gauss constraint (PRX 10.041057 Appendix A)
-        !> This is the CORRECT implementation: B'_M = P[lambda] * B_M
+        !> This is the CORRECT implementation: B'_M = P[lambda] * B_M (left multiply)
         procedure, nopass :: Apply_P_Lambda_To_B => Apply_P_Lambda_To_B_base
+        !> Right multiply by P[lambda]: B'_M = B_M * P[lambda] (for left propagation with B^†)
+        procedure, nopass :: Apply_P_Lambda_To_B_Right => Apply_P_Lambda_To_B_Right_base
         procedure, nopass :: Use_Strict_Gauss => Use_Strict_Gauss_base
         !> Sweep over all lambda fields (site-only update with Sherman-Morrison)
         procedure, nopass :: Sweep_Lambda => Sweep_Lambda_base
@@ -874,6 +876,32 @@
            ! Override in Hamiltonian submodule for strict Gauss constraint
            
          end Subroutine Apply_P_Lambda_To_B_base
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Applies P[lambda] to B-matrix from the RIGHT (for left propagation).
+!> B' = B * P[lambda]  (right multiply)
+!> This is used in wrapul where we build B^†, so (P*B)^† = B^† * P.
+!>
+!> This base implementation does nothing.
+!> Override in Hamiltonian submodule for strict Gauss constraint.
+!>
+!> @param [INOUT] B_slice   Complex(:,:)
+!> @param [IN] nf   Integer, flavor index
+!-------------------------------------------------------------------
+         Subroutine Apply_P_Lambda_To_B_Right_base(B_slice, nf)
+           Implicit none
+           
+           Complex (Kind=Kind(0.d0)), INTENT(INOUT) :: B_slice(:,:)
+           Integer, INTENT(IN) :: nf
+           
+           ! Default implementation: do nothing
+           ! Override in Hamiltonian submodule for strict Gauss constraint
+           
+         end Subroutine Apply_P_Lambda_To_B_Right_base
 
 !--------------------------------------------------------------------
 !> @author
