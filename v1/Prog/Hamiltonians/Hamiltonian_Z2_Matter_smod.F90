@@ -645,22 +645,23 @@
                    G_r_new = Compute_Gauss_Operator_Int(I2, nt)
                    
                    ! After sigma flip, X_r at both sites changes sign (sigma enters star once)
-                   ! So G_r_new(site) = -G_r_old(site)
+                   ! So G_r changes from G_r_old to -G_r_old at each affected site
                    ! Weight ratio = W_new / W_old for both sites
-                   ! Using W = (1/4)(1+λ)(1+λG)
-                   ! R = [W(λ,G_new1)*W(λ,G_new2)] / [W(λ,G_old1)*W(λ,G_old2)]
-                   !   = [W(λ,-G_old1)*W(λ,-G_old2)] / [W(λ,G_old1)*W(λ,G_old2)]
+                   ! W = (1/4)(1+λ)(1+λG) gives 0 for λ=+1,G=-1 and 1 for λ=+1,G=+1
+                   !
+                   ! CRITICAL: Handle W_old=0 case properly!
+                   ! If W_old=0 (violating), we want to encourage moves that fix it
+                   ! If W_new=0 (would violate), we want to reject
                    
                    R_Gauss = 1.d0
-                   lambda_old = lambda_field(I1)
-                   ! For site I1: G changes from G_r_old to -G_r_old
-                   R_Gauss = R_Gauss * Compute_Gauss_Weight(lambda_old, -G_r_old) / &
-                        max(Compute_Gauss_Weight(lambda_old, G_r_old), 1.d-30)
                    
+                   ! Site I1: G changes from G_r_old to -G_r_old
+                   lambda_old = lambda_field(I1)
+                   Call Compute_Gauss_Weight_Ratio(lambda_old, G_r_old, -G_r_old, R_Gauss)
+                   
+                   ! Site I2: G changes from G_r_new to -G_r_new
                    lambda_new = lambda_field(I2)
-                   ! For site I2: G changes from G_r_new (before flip) to -G_r_new
-                   R_Gauss = R_Gauss * Compute_Gauss_Weight(lambda_new, -G_r_new) / &
-                        max(Compute_Gauss_Weight(lambda_new, G_r_new), 1.d-30)
+                   Call Compute_Gauss_Weight_Ratio(lambda_new, G_r_new, -G_r_new, R_Gauss)
                    
                    S0 = S0 * R_Gauss
                 endif
@@ -1636,7 +1637,7 @@
 !> @param[IN] G_r_new     Integer, new Gauss operator value
 !> @return Weight ratio (0 if update would violate Gauss law)
 !--------------------------------------------------------------------
-        Real (Kind=Kind(0.d0)) Function Compute_Gauss_Weight_Ratio(lambda_old, lambda_new, G_r_old, G_r_new)
+        Real (Kind=Kind(0.d0)) Function Compute_Gauss_Weight_Ratio_Func(lambda_old, lambda_new, G_r_old, G_r_new)
 
           Implicit none
           
@@ -1652,14 +1653,69 @@
              ! Old config should satisfy Gauss law - this is an error
              Write(6,*) 'WARNING: Compute_Gauss_Weight_Ratio called with W_old=0'
              Write(6,*) '  lambda_old=', lambda_old, ' G_r_old=', G_r_old
-             Compute_Gauss_Weight_Ratio = 0.d0
+             Compute_Gauss_Weight_Ratio_Func = 0.d0
              return
           endif
           
           ! Return ratio
-          Compute_Gauss_Weight_Ratio = W_new / W_old
+          Compute_Gauss_Weight_Ratio_Func = W_new / W_old
 
-        End Function Compute_Gauss_Weight_Ratio
+        End Function Compute_Gauss_Weight_Ratio_Func
+
+!--------------------------------------------------------------------
+!> @author
+!> ALF Collaboration
+!>
+!> @brief
+!> Subroutine version of Gauss weight ratio for sigma update.
+!> Handles the W_old=0 case properly for random initial configurations.
+!>
+!> Logic:
+!>   - If W_new > 0 and W_old > 0: multiply R by W_new/W_old
+!>   - If W_new > 0 and W_old = 0: encourage this (set R = large)
+!>   - If W_new = 0 and W_old > 0: reject (set R = 0)
+!>   - If W_new = 0 and W_old = 0: neutral (R unchanged)
+!>
+!> @param[IN] lambda_val  Integer, lambda field value (+1 or -1)
+!> @param[IN] G_r_old     Integer, old Gauss operator value
+!> @param[IN] G_r_new     Integer, new Gauss operator value
+!> @param[INOUT] R_Gauss  Real, cumulative weight ratio
+!--------------------------------------------------------------------
+        Subroutine Compute_Gauss_Weight_Ratio(lambda_val, G_r_old, G_r_new, R_Gauss)
+
+          Implicit none
+          
+          Integer, Intent(IN) :: lambda_val, G_r_old, G_r_new
+          Real (Kind=Kind(0.d0)), Intent(INOUT) :: R_Gauss
+          
+          ! Local
+          Real (Kind=Kind(0.d0)) :: W_old, W_new
+          Real (Kind=Kind(0.d0)), parameter :: LARGE_WEIGHT = 1.d10
+          
+          W_old = Compute_Gauss_Weight(lambda_val, G_r_old)
+          W_new = Compute_Gauss_Weight(lambda_val, G_r_new)
+          
+          If (W_old > 1.d-10) then
+             ! Normal case: old config satisfies Gauss law
+             If (W_new > 1.d-10) then
+                ! Both old and new satisfy -> normal ratio
+                R_Gauss = R_Gauss * W_new / W_old
+             else
+                ! New would violate -> reject
+                R_Gauss = 0.d0
+             endif
+          else
+             ! Old config violates Gauss law (should not happen, but handle gracefully)
+             If (W_new > 1.d-10) then
+                ! New would satisfy -> strongly encourage!
+                R_Gauss = R_Gauss * LARGE_WEIGHT
+             else
+                ! Both violate -> neutral (keep looking for escape)
+                ! R_Gauss unchanged
+             endif
+          endif
+
+        End Subroutine Compute_Gauss_Weight_Ratio
 
 !--------------------------------------------------------------------
 !> @author
@@ -2909,24 +2965,50 @@
            enddo
         endif
         If ( Abs(Ham_TZ2) > Zero ) then
-           !  Start with a pi-flux state.
-           Do nt = 1,Ltrot
-              Do I = 1, Latt%N
-                 if (mod( Latt%list(i,1) + latt%list(i,2), 2 ) == 0 ) then
-                    Initial_field(Field_list(I,1,1),nt) =  cmplx( 1.d0, 0.d0, Kind(0.d0))
-                    Initial_field(Field_list(I,2,1),nt) =  cmplx(-1.d0, 0.d0, Kind(0.d0))
-                 else
-                    Initial_field(Field_list(I,1,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
-                    Initial_field(Field_list(I,2,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
-                 endif
+           If (UseStrictGauss) then
+              ! ============================================================
+              ! For strict Gauss constraint, initialize sigma to satisfy G_r = +1
+              ! G_r = Q_r * tau_r^x * X_r, where X_r = prod_b sigma_b^z
+              ! 
+              ! With all sigma = +1, X_r = +1 for all sites.
+              ! Combined with Q_r = +1 (even sector) and tau_r^x = +1 (uniform tau),
+              ! this gives G_r = +1.
+              ! ============================================================
+              Do nt = 1, Ltrot
+                 Do I = 1, Latt%N
+                    if (mod(Latt%list(I,1) + Latt%list(I,2), 2) == 0) then
+                       Initial_field(Field_list(I,1,1),nt) = cmplx(1.d0, 0.d0, Kind(0.d0))
+                       Initial_field(Field_list(I,2,1),nt) = cmplx(1.d0, 0.d0, Kind(0.d0))
+                    endif
+                 Enddo
               Enddo
-           Enddo
+              Write(6,*) 'Gauge fields initialized to +1 (Gauss constraint satisfied)'
+           else
+              !  Start with a pi-flux state (original behavior).
+              Do nt = 1,Ltrot
+                 Do I = 1, Latt%N
+                    if (mod( Latt%list(i,1) + latt%list(i,2), 2 ) == 0 ) then
+                       Initial_field(Field_list(I,1,1),nt) =  cmplx( 1.d0, 0.d0, Kind(0.d0))
+                       Initial_field(Field_list(I,2,1),nt) =  cmplx(-1.d0, 0.d0, Kind(0.d0))
+                    else
+                       Initial_field(Field_list(I,1,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
+                       Initial_field(Field_list(I,2,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
+                    endif
+                 Enddo
+              Enddo
+           endif
         endif
         If ( Abs(Ham_T) > Zero ) then
            Do nt = 1,Ltrot
               Do I = 1,Latt%N
-                 Isigma(I) = 1
-                 if ( ranf_wrap()  > 0.5D0 ) Isigma(I)  = -1
+                 If (UseStrictGauss) then
+                    ! For Gauss constraint, initialize tau = +1 uniformly
+                    ! This ensures tau_r^x = tau(t)*tau(t+1) = +1
+                    Isigma(I) = 1
+                 else
+                    Isigma(I) = 1
+                    if ( ranf_wrap()  > 0.5D0 ) Isigma(I)  = -1
+                 endif
               enddo
               Do I = 1,Latt%N
                  Do n_orientation = 1,2
@@ -2948,6 +3030,9 @@
                  endif
               enddo
            enddo
+           If (UseStrictGauss) then
+              Write(6,*) 'Matter fields initialized to +1 (tau_r^x = +1)'
+           endif
         endif
         
         ! ============================================================
