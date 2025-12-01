@@ -1019,6 +1019,11 @@ Program Main
            Call Global_Tempering_Pr
 #endif
 
+           ! Print Gauss constraint diagnostic at end of each bin (every 10th bin)
+           If (mod(NBC, 10) == 1) then
+              Call ham%GaussViol_Diagnostic(NBC)
+           endif
+
            Call nsigma%out(Group_Comm)
 
            call system_clock(count_bin_end)

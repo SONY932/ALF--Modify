@@ -139,7 +139,6 @@
       !>    K_time (Gamma_Gauss_Sigma): sigma star-product time coupling strength
       !>    K_time = -0.5 * ln(tanh(epsilon * h_sigma)) = 0.5 * ln(coth(epsilon * h_sigma))
       Real (Kind=Kind(0.d0)) :: Gamma_Gauss_Sigma
-
     contains
       
       module Subroutine Ham_Alloc_Z2_Matter
@@ -2699,27 +2698,51 @@
            enddo
         endif
         If ( Abs(Ham_TZ2) > Zero ) then
-           !  Start with a pi-flux state (same for Gauss and non-Gauss).
-           !  The Gauss constraint will be enforced through the weight function,
-           !  not through initial configuration.
-           Do nt = 1,Ltrot
-              Do I = 1, Latt%N
-                 if (mod( Latt%list(i,1) + latt%list(i,2), 2 ) == 0 ) then
-                    Initial_field(Field_list(I,1,1),nt) =  cmplx( 1.d0, 0.d0, Kind(0.d0))
-                    Initial_field(Field_list(I,2,1),nt) =  cmplx(-1.d0, 0.d0, Kind(0.d0))
-                 else
-                    Initial_field(Field_list(I,1,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
-                    Initial_field(Field_list(I,2,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
-                 endif
+           If (UseStrictGauss) then
+              ! ============================================================
+              ! For strict Gauss constraint: use uniform sigma^z = +1 config
+              ! This ensures sigma^x = sigma^z(n) * sigma^z(n+1) = +1
+              ! ============================================================
+              Do nt = 1,Ltrot
+                 Do I = 1, Latt%N
+                    Initial_field(Field_list(I,1,1),nt) = cmplx(1.d0, 0.d0, Kind(0.d0))
+                    Initial_field(Field_list(I,2,1),nt) = cmplx(1.d0, 0.d0, Kind(0.d0))
+                 Enddo
               Enddo
-           Enddo
+              Write(6,*) 'Gauss init: All sigma^z = +1 (uniform flux)'
+           else
+              !  Start with a pi-flux state (non-Gauss case).
+              Do nt = 1,Ltrot
+                 Do I = 1, Latt%N
+                    if (mod( Latt%list(i,1) + latt%list(i,2), 2 ) == 0 ) then
+                       Initial_field(Field_list(I,1,1),nt) =  cmplx( 1.d0, 0.d0, Kind(0.d0))
+                       Initial_field(Field_list(I,2,1),nt) =  cmplx(-1.d0, 0.d0, Kind(0.d0))
+                    else
+                       Initial_field(Field_list(I,1,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
+                       Initial_field(Field_list(I,2,1),nt) =  cmplx(1.d0, 0.d0, Kind(0.d0))
+                    endif
+                 Enddo
+              Enddo
+           endif
         endif
         If ( Abs(Ham_T) > Zero ) then
            Do nt = 1,Ltrot
-              Do I = 1,Latt%N
-                 Isigma(I) = 1
-                 if ( ranf_wrap()  > 0.5D0 ) Isigma(I)  = -1
-              enddo
+              If (UseStrictGauss) then
+                 ! ============================================================
+                 ! For strict Gauss constraint: use uniform tau^z = +1 config
+                 ! This ensures tau^x = tau^z(n) * tau^z(n+1) = +1
+                 ! Combined with sigma^x = +1, we get G_r = Q_r * 1 * 1 = Q_r
+                 ! For even sector (Q_r = +1), G_r = +1 (constraint satisfied!)
+                 ! ============================================================
+                 Do I = 1,Latt%N
+                    Isigma(I) = 1
+                 enddo
+              else
+                 Do I = 1,Latt%N
+                    Isigma(I) = 1
+                    if ( ranf_wrap()  > 0.5D0 ) Isigma(I)  = -1
+                 enddo
+              endif
               Do I = 1,Latt%N
                  Do n_orientation = 1,2
                     nc = Field_list(I,n_orientation,2)
@@ -2740,6 +2763,10 @@
                  endif
               enddo
            enddo
+           If (UseStrictGauss) then
+              Write(6,*) 'Gauss init: All tau^z = +1 (uniform matter)'
+              Write(6,*) '  -> Initial G_r = Q_r * 1 * 1 = Q_r (constraint satisfied!)'
+           endif
         endif
         
         ! ============================================================
