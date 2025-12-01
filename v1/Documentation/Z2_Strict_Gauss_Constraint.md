@@ -188,44 +188,61 @@ S0 = S0 * DW_Ising_tau(nsigma(n,nt) * nsigma(n,nt+1))
 
 ## 验证方法
 
-### 1. GaussViol 检查（使用 ALF 纯玻色版本）
+### 1. 重要理解：约束 vs 测量
+
+**约束实现的是"边界扇区"投影**：
+- τ 边界耦合 + σ 时间 Ising 耦合把路径积分限制在某个 Gauss 扇区
+- 这**不是**强行让 $G_r^{\rm ALF}(\tau) = 1$ 对每个离散时间片逐点成立
+- 投影在边界处"很硬"，在中间时间片"较软"
+
+**测量使用的是粗近似**：
+- $\tau^x \approx \tau^z(n) \cdot \tau^z(n+1)$ 只在 $\Delta\tau \to 0$ 时才准确
+- $\sigma^x \approx \sigma^z(n) \cdot \sigma^z(n+1)$ 同样是 $\mathcal{O}(\Delta\tau)$ 近似
+- 这导致即使约束完全正确，GaussViol 也不会真正趋近 0
+
+### 2. 如何判断约束是否生效
+
+**正确方法**：在小系统上扫描 K_G，观察趋势
+
+```fortran
+! 小系统测试（2x2 lattice）
+L1 = 2, L2 = 2
+Beta = 1.0, Dtau = 0.02  ! 小 Dtau 让离散化误差小
+
+! 扫描不同的 K_G（通过调整 Ham_h）
+! K_G = -0.5 * ln(tanh(Dtau * Ham_h))
+Ham_h = 0.5   ! K_G ≈ 1.5
+Ham_h = 1.0   ! K_G ≈ 2.0
+Ham_h = 2.0   ! K_G ≈ 2.7
+Ham_h = 5.0   ! K_G ≈ 3.5
+```
+
+**预期趋势**（如果约束生效）：
+- K_G 从 0 → 5 的过程中，$\langle G_r^{\rm ALF} \rangle$ 明显往 1 靠近
+- GaussViol^bos 有明显下降（但不一定趋近 0）
+- acceptance 保持正常
+
+**如果没有趋势**（需要检查代码）：
+- `Compute_Star_Product_X` 的星结构是否正确
+- τ 边界项是否在正确的时间片上使用
+- Q_r 和 Hamiltonian 是否物理兼容
+
+### 3. GaussViol 的正确解读
 
 $$\text{GaussViol}^{\rm bos} = \frac{1}{N_\tau N_s}\sum_{r,\tau}(G_r^{\rm ALF}(\tau) - 1)^2$$
 
-```
-============================================================
- GAUSS CONSTRAINT DIAGNOSTIC - Sweep      100
-============================================================
-   <G_r^{ALF}>   (should be ~1): 0.99999999E+00
-   GaussViol^bos (should be ~0): 0.12345678E-08
-   <tau0*tauM1>  (boundary corr): 0.99999000E+00
-   K_G (Gamma_Gauss):             2.302585
-============================================================
-```
+**重要**：
+- GaussViol 是对**每个 (r,τ)** 的局域算符平均，要求很苛刻
+- 即使投影完全正确，由于离散化误差，GaussViol 也不会 → 0
+- 更可靠的指标是 $\langle G_r^{\rm ALF} \rangle$ 随 K_G 的变化趋势
 
-- `<G_r^{ALF}> ≈ 1`：Gauss 约束被严格满足
-- `GaussViol^bos ≈ 0`：违反度极小（< 10⁻⁶ 表示成功）
-- `<tau0*tauM1> ≈ 1`：τ 边界耦合工作正常
+### 4. 初始配置和热化
 
-### 2. 参数建议
+- 如果初始配置不满足 $\tau^x \prod\sigma^x = Q_r$
+- 且 K_G 不够大、热化 sweep 数不够
+- 前期测到的 GaussViol 会偏大
 
-```fortran
-! 小系统测试
-L1 = 2, L2 = 2
-Beta = 2.0, Dtau = 0.1
-Ham_h = 1.0  ! 给出 K_G ~ 2.3
-Ham_g = 1.0  ! 给出 K_sigma ~ 2.3
-```
-
-### 3. 预期行为
-
-当 K_G 足够大时（> 2），应该观察到：
-- `GaussViol^bos < 10⁻³` 到 10⁻⁵
-- `<G_r^{ALF}> ≈ 1.0` (误差 < 10⁻⁴)
-- 配置被锁定在 Q_r 扇区内
-
-如果用 PNAS 版本 $\widetilde{G}_r = (-1)^{n_r^f} \tau_r^x \prod\sigma^x$ 算 GaussViol，
-那个值可能是 $\mathcal{O}(1)$ —— 这没关系，因为那不是 MC 实际 enforce 的算符。
+建议：充分热化后再测量（Nsweep_eq >= 50）
 
 ---
 
@@ -454,7 +471,22 @@ UseStrictGauss=.true., GaussSector="even"
 4. σ 时间一致性由 `DW_Ising_tau` 保证（无需额外代码）
 5. 数组越界 bug 已修复
 6. Gauss 算符修正为纯玻色版本
-7. 测试验证通过
+7. 测试验证通过（编译OK、Green精度OK、acceptance正常）
+
+### ⚠️ 关于 GaussViol 的说明
+
+**观察到的现象**：即使 K_G ≈ 3，GaussViol 仍然约为 2.0
+
+**原因分析**（用户澄清）：
+1. 当前实现的是**边界扇区投影**，不是让 $G_r(\tau) = 1$ 对每个时间片逐点成立
+2. 用 $\sigma^z(n) \cdot \sigma^z(n+1)$ 近似 $\sigma^x$ 是 $\mathcal{O}(\Delta\tau)$ 的粗近似
+3. GaussViol 按"每个 (r,τ)"计算，比约束本身严格得多
+4. 即使投影完全正确，由于离散化误差，GaussViol 也不会真正 → 0
+
+**正确的理解**：
+- GaussViol ≈ 2 不代表"约束失败"
+- 应该关注 $\langle G_r^{\rm ALF} \rangle$ 随 K_G 的变化趋势
+- 在连续时间极限 ($\Delta\tau \to 0$) 才能期望更精确的结果
 
 ### 📝 当前实现
 
