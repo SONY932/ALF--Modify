@@ -1382,6 +1382,11 @@
 !> @param[IN] I  Integer, site index
 !> @param[IN] nt Integer, time slice
 !> @return X_r = +1 or -1
+!>
+!> In the Trotter decomposition, σ^x is approximated by the time correlation:
+!>   σ^x(b) ≈ σ^z(b,n) * σ^z(b,n+1)
+!> The star product is then:
+!>   X_r(n) = Π_{b∈+r} [σ^z(b,n) * σ^z(b,n+1)]
 !--------------------------------------------------------------------
         Integer Function Compute_Star_Product_X(I, nt)
 
@@ -1392,7 +1397,8 @@
           ! Local
           Integer :: I_mx, I_my  ! Sites at -x, -y directions
           Integer :: n1, n2, n3, n4  ! Field indices for the 4 links
-          Integer :: X_r
+          Integer :: nt_p1, X_r
+          Integer :: s1, s2, s3, s4  ! sigma^x approximations
           
           ! For a 2D square lattice, the star at site I consists of 4 links:
           !      I+y
@@ -1422,13 +1428,19 @@
           n3 = Field_list(I_mx, 1, 1)  ! Link (I-x, I)
           n4 = Field_list(I_my, 2, 1)  ! Link (I-y, I)
           
-          ! sigma^x acting on Ising variable gives the sign
-          ! For sigma^x: |+> -> |+>, |-> -> -|->
-          ! In terms of Ising variables, sigma^x effectively measures
-          ! the correlation between adjacent time slices
-          ! Here we use the spatial configuration at time nt
-          ! The star product is: prod sigma^z on the 4 links
-          X_r = nsigma%i(n1, nt) * nsigma%i(n2, nt) * nsigma%i(n3, nt) * nsigma%i(n4, nt)
+          ! Get next time slice with periodic boundary
+          nt_p1 = nt + 1
+          If (nt == Ltrot) nt_p1 = 1
+          
+          ! σ^x(b) ≈ σ^z(b,n) * σ^z(b,n+1) (time correlation)
+          ! This is how σ^x is represented in the Trotter decomposition
+          s1 = nsigma%i(n1, nt) * nsigma%i(n1, nt_p1)
+          s2 = nsigma%i(n2, nt) * nsigma%i(n2, nt_p1)
+          s3 = nsigma%i(n3, nt) * nsigma%i(n3, nt_p1)
+          s4 = nsigma%i(n4, nt) * nsigma%i(n4, nt_p1)
+          
+          ! Star product: X_r = Π σ^x_b ≈ Π [σ^z(b,n) * σ^z(b,n+1)]
+          X_r = s1 * s2 * s3 * s4
           
           Compute_Star_Product_X = X_r
 
@@ -1546,12 +1558,13 @@
 !>
 !> @param[IN] I  Integer, site index
 !> @param[IN] nt Integer, time slice
-!> @return Bosonic part of G_r = τ_r^x * X_r (without (-1)^{n_r^f})
+!> @return G_r^{ALF} = Q_r * τ_r^x * X_r (pure bosonic Gauss operator)
 !>
-!> NOTE: This returns only the BOSONIC part τ_r^x * X_r.
-!> The full Gauss operator G_r = (-1)^{n_r^f} * τ_r^x * X_r requires
-!> the fermion Green function. Use Compute_Gauss_Operator(I, nt, GRC)
-!> for the full operator including fermion parity.
+!> This is the PRX/ALF version of the Gauss operator used for:
+!>   - Constraint enforcement (G_r^{ALF} = +1)
+!>   - GaussViol diagnostic
+!>
+!> In the slave-spin construction, (-1)^{n_r^f} is absorbed into τ.
 !--------------------------------------------------------------------
         Integer Function Compute_Gauss_Operator_Int(I, nt)
 
@@ -1560,7 +1573,7 @@
           Integer, Intent(IN) :: I, nt
           
           ! Local
-          Integer :: X_r, tau_r_x
+          Integer :: X_r, tau_r_x, Q_r
           Integer :: nt1
           Integer, allocatable :: Isigma(:), Isigmap1(:)
           
@@ -1568,6 +1581,9 @@
              Compute_Gauss_Operator_Int = 1
              return
           endif
+          
+          ! Get background charge Q_r
+          Q_r = Q_background(I)
           
           ! Get star product X_r = prod_{b in +r} sigma_b^x
           X_r = Compute_Star_Product_X(I, nt)
@@ -1589,9 +1605,9 @@
              tau_r_x = 1
           endif
           
-          ! Return BOSONIC part only: τ_r^x * X_r
-          ! Full G_r = (-1)^{n_r^f} * τ_r^x * X_r (need GRC for fermion parity)
-          Compute_Gauss_Operator_Int = tau_r_x * X_r
+          ! G_r^{ALF} = Q_r * τ_r^x * X_r  (PRX/ALF pure bosonic version)
+          ! Constraint: G_r^{ALF} = +1
+          Compute_Gauss_Operator_Int = Q_r * tau_r_x * X_r
 
         End Function Compute_Gauss_Operator_Int
 
@@ -1746,11 +1762,19 @@
 !> PRX orthogonal-fermion / slave-spin construction:
 !>   G_r = Q_r * τ_r^x * Π_{b∈+r} σ_b^x
 !>
-!> IMPORTANT: Full Gauss operator includes (-1)^{n_r^f} from fermion occupation!
-!>   G_r = (-1)^{n_r^f} * τ_r^x * Π_{b∈+r} σ_b^x
-!> The constraint is G_r = Q_r (background charge).
-!> 
-!> Reference: PNAS 2018, Eq. above Fig. 1
+!> PRX/ALF slave-spin construction: PURE BOSONIC Gauss operator
+!>   G_r^{ALF} = Q_r * τ_r^x * Π_{b∈+r} σ_b^x
+!>
+!> In the orthogonal-fermion / slave-spin framework, the fermion parity
+!> (-1)^{n_r^f} is ABSORBED into τ. The Gauss constraint we enforce is:
+!>   G_r^{ALF} = +1  (i.e., τ_r^x * Π σ_b^x = Q_r)
+!>
+!> This is the operator used for:
+!>   - GaussViol diagnostic
+!>   - Gauss sector enforcement
+!>
+!> NOTE: (-1)^{n_r^f} is NOT included here. If you want the PNAS version
+!> with fermion parity, use a separate observable.
 !--------------------------------------------------------------------
         Complex (Kind=Kind(0.d0)) Function Compute_Gauss_Operator(I, nt, GRC)
 
@@ -1760,15 +1784,16 @@
           Complex (Kind=Kind(0.d0)), Intent(IN) :: GRC(:,:,:)
           
           ! Local
-          Integer :: X_r, tau_r_x, nt1, nf
-          Integer :: fermion_parity   ! (-1)^{n_r^f}
-          Real (Kind=Kind(0.d0)) :: n_r_total
+          Integer :: X_r, tau_r_x, Q_r, nt1
           Integer, allocatable :: Isigma(:), Isigmap1(:)
           
           If (.not. UseStrictGauss) then
              Compute_Gauss_Operator = cmplx(1.d0, 0.d0, kind(0.d0))
              return
           endif
+          
+          ! Get background charge Q_r
+          Q_r = Q_background(I)
           
           ! Get star product X_r = prod_{b in +r} sigma_b^x
           X_r = Compute_Star_Product_X(I, nt)
@@ -1788,27 +1813,9 @@
              tau_r_x = 1
           endif
           
-          ! Compute (-1)^{n_r^f} from fermion occupation
-          ! n_r = sum_sigma (1 - G_{rr,sigma}) = N_SUN - sum_sigma G_{rr,sigma}
-          ! For the Gauss operator, we need the parity (-1)^{n_r}
-          n_r_total = 0.d0
-          Do nf = 1, N_FL
-             ! G_{rr} = <c^dag_r c_r>, so n_r = 1 - G_{rr} for each flavor/spin
-             ! Actually in ALF: GRC(I,I,nf) is Green function, occupation is 1 - GRC
-             n_r_total = n_r_total + real(N_SUN, kind(0.d0)) - &
-                  & real(N_SUN, kind(0.d0)) * real(GRC(I,I,nf), kind(0.d0))
-          Enddo
-          ! Determine parity: (-1)^{n_r}
-          ! For integer occupation, use nint; for non-integer, this is an approximation
-          If (mod(nint(n_r_total), 2) == 0) then
-             fermion_parity = 1
-          else
-             fermion_parity = -1
-          endif
-          
-          ! G_r = (-1)^{n_r^f} * τ_r^x * X_r  (PNAS 2018 formula)
-          ! Constraint: G_r = Q_r
-          Compute_Gauss_Operator = cmplx(real(fermion_parity * tau_r_x * X_r, kind(0.d0)), 0.d0, kind(0.d0))
+          ! G_r^{ALF} = Q_r * τ_r^x * X_r  (PRX/ALF pure bosonic version)
+          ! Constraint: G_r^{ALF} = +1
+          Compute_Gauss_Operator = cmplx(real(Q_r * tau_r_x * X_r, kind(0.d0)), 0.d0, kind(0.d0))
 
         End Function Compute_Gauss_Operator
 
