@@ -1,0 +1,51 @@
+# Compiled object files
+*.o
+
+# Fortran module files
+*.mod
+*.smod
+
+# Static libraries
+*.a
+
+# Program output files
+*.out
+
+# Auto-generated Makefiles (keep Makefile.make templates)
+Makefile
+!Makefile.make
+
+# Auto-generated git info headers
+Prog/git.h
+Prog/git_status.h
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Test output directories
+test_gauss/
+
+# Simulation output files (common ALF outputs)
+confout_*
+confin_*
+info
+info_git
+seeds_out
+*_eq
+*_eq_info
+*_scal
+*_scal_info
+*.log
+
+# Editor and IDE files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# HDF5 data files
+*.h5
+*.hdf5
